@@ -1,0 +1,23 @@
+# R
+.Rproj.user/
+.Rhistory
+.RData
+.Rprofile
+*.Rproj
+
+# renv
+renv/library/
+renv/python/
+renv/staging/
+
+# Large data / HDF5 cache (downloaded at runtime)
+data/h5_cache/
+data/*.h5
+
+# Results and figures (generated at runtime)
+results/
+figures/
+
+# OS
+.DS_Store
+Thumbs.db
