@@ -21,14 +21,16 @@ processors=8
 ## Project structure
 
 ```
+notebooks/
+  01_data_acquisition.qmd   # Step 1: load data, inspect structure, validate linkage (Quarto)
+  02_quality_control.qmd    # Step 2: cell/image/marker QC (Quarto)
+  03_preprocessing.qmd      # Step 3: transformation, normalisation, EDA (Quarto)
 R/
-  01_data_acquisition.R   # Step 1: load data, inspect structure, validate linkage
-  02_quality_control.R    # Step 2: cell/image/marker QC
-  03_preprocessing.R      # Step 3: transformation, normalisation, EDA
+  01_data_acquisition.R     # Step 1: plain R script equivalent
 data/
-  h5_cache/               # HDF5-backed images (auto-created, git-ignored)
-results/                  # Saved .rds / .csv outputs
-figures/                  # Saved plots
+  h5_cache/                 # HDF5-backed images (auto-created, git-ignored)
+results/                    # Saved .rds / .csv outputs
+figures/                    # Saved plots
 ```
 
 ## Dependencies
@@ -58,6 +60,19 @@ BiocManager::install(c(
 ```
 
 ## Running the pipeline
+
+### Option A — Quarto notebooks (recommended, human-readable)
+
+Open any `.qmd` file in RStudio or VS Code and click **Render**, or from the terminal:
+
+```bash
+quarto render notebooks/01_data_acquisition.qmd
+```
+
+This produces a self-contained `01_data_acquisition.html` file with narrative text,
+code, and all figures inline — readable in any browser without R installed.
+
+### Option B — Plain R scripts
 
 Run each script in order:
 
