@@ -24,4 +24,4 @@ dependencies:
 
   # ── System libraries ───────────────────────────────────────────────────────
   - libjpeg-turbo          # conda-forge name (replaces bare "libjpeg")
-  - libhdf5                # conda-forge name for the HDF5 C library
+  - hdf5                # conda-forge name for the HDF5 C library

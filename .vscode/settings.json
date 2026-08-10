@@ -1,9 +1,9 @@
 {
-    "python.defaultInterpreterPath": "/home/sam/miniconda3/envs/sc-exp/bin/python",
+    "python.defaultInterpreterPath": "/home/lizalfos/miniconda3/envs/mass-cytometry/bin/python",
     "python.terminal.activateEnvironment": true,
     "python.terminal.activateEnvInCurrentTerminal": true,
     "jupyter.kernels.excludePythonEnvironments": "all",
     "jupyter.kernels.includePythonEnvironments": [
-        "/home/sam/miniconda3/envs/sc-exp"
+        "/home/lizalfos/miniconda3/envs/mass-cytometry"
     ]
 }

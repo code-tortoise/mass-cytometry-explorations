@@ -59,7 +59,19 @@ image-level operations.
 ---
 
 ## Setup
+<!--- Installing packages into R using this 
+`install.packages(c("ggplot2", "dplyr", "patchwork", "jsonlite"))`
+`if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
 
+BiocManager::install(c(
+    "imcdatasets",        # the dataset itself
+    "SingleCellExperiment", # single-cell analysis
+    "SpatialExperiment", # single-cell spatial analysis
+    "cytomapper",         # CytoImageList + image handling
+    "HDF5Array",          # on-disk HDF5 storage for images
+    "ExperimentHub"       # download hub for imcdatasets
+))` -->
 ### Load packages
 
 ```{r setup}
