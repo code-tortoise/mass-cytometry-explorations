@@ -1,0 +1,27 @@
+name: mass-cytometry
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  # ── Runtime ───────────────────────────────────────────────────────────────
+  - r-base=4.4
+  - quarto
+
+  # ── CRAN packages ─────────────────────────────────────────────────────────
+  - r-ggplot2
+  - r-dplyr
+  - r-patchwork
+  - r-jsonlite
+
+  # ── Bioconductor packages ──────────────────────────────────────────────────
+  - bioconductor-imcdatasets
+  - bioconductor-singlecellexperiment
+  - bioconductor-spatialexperiment
+  - bioconductor-cytomapper
+  - bioconductor-hdf5array
+  - bioconductor-experimenthub
+
+  # ── System libraries ───────────────────────────────────────────────────────
+  - libjpeg-turbo          # conda-forge name (replaces bare "libjpeg")
+  - libhdf5                # conda-forge name for the HDF5 C library
