@@ -15,6 +15,8 @@ format:
     fig-width: 9
     fig-height: 6
     embed-resources: true   # single self-contained HTML file
+conda:
+  environment: mass-cytometry
 execute:
   echo: true          # show all code
   warning: false
@@ -71,7 +73,8 @@ BiocManager::install(c(
     "cytomapper",         # CytoImageList + image handling
     "HDF5Array",          # on-disk HDF5 storage for images
     "ExperimentHub"       # download hub for imcdatasets
-))` -->
+))
+`BiocManager::install("imcdatasets")` -->
 ### Load packages
 
 ```{r setup}
