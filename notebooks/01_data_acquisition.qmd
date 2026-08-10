@@ -72,6 +72,28 @@ BiocManager::install(c(
     "HDF5Array",          # on-disk HDF5 storage for images
     "ExperimentHub"       # download hub for imcdatasets
 ))` -->
+### Install missing packages
+
+```{r install-packages, include=FALSE}
+bioc_pkgs <- c(
+    "imcdatasets", "SingleCellExperiment", "SpatialExperiment",
+    "cytomapper", "HDF5Array", "ExperimentHub"
+)
+cran_pkgs <- c("ggplot2", "dplyr", "patchwork")
+
+missing_bioc <- bioc_pkgs[!sapply(bioc_pkgs, requireNamespace, quietly = TRUE)]
+missing_cran <- cran_pkgs[!sapply(cran_pkgs, requireNamespace, quietly = TRUE)]
+
+if (length(missing_bioc) > 0 || length(missing_cran) > 0) {
+    if (!requireNamespace("BiocManager", quietly = TRUE))
+        install.packages("BiocManager")
+    if (length(missing_bioc) > 0)
+        BiocManager::install(missing_bioc, ask = FALSE, update = FALSE)
+    if (length(missing_cran) > 0)
+        install.packages(missing_cran)
+}
+```
+
 ### Load packages
 
 ```{r setup}
@@ -237,7 +259,6 @@ summary(cells_per_image$n_cells)
 ```
 
 ```{r fig-cells-per-image, fig.height=10}
-#| label: fig-cells-per-image
 #| fig-cap: "Cells per image, sorted ascending. The dashed red line marks a typical QC threshold of 100 cells — images below this may represent failed or poor-quality acquisitions."
 
 ggplot(cells_per_image,
@@ -270,7 +291,6 @@ cat(sprintf("\nUnique patients: %d\n", length(unique(sce$patient_id))))
 ```
 
 ```{r fig-patient-groups}
-#| label: fig-patient-groups
 #| fig-cap: "Total cell count per patient, broken down by patient group. Each point represents one patient. Violin shape shows the distribution across patients within each group."
 
 cells_per_patient <- as.data.frame(colData(sce)) |>
@@ -294,7 +314,6 @@ ggplot(cells_per_patient,
 ### Antibody panel
 
 ```{r fig-panel}
-#| label: fig-panel
 #| fig-cap: "39-channel IMC antibody panel. Each point is one marker; the metal tag (channel name) is shown to the right."
 
 panel <- as.data.frame(rowData(sce))
