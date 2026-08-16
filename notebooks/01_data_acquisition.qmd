@@ -1,6 +1,6 @@
 ---
 title: "Step 1 — Data Acquisition & Inspection"
-subtitle: "Meyer et al. (2025) TNBC Replication | imcdatasets"
+subtitle: "Jackson & Fischer et al. (2020) Breast Cancer | imcdatasets"
 author: "mass-cytometry-explorations"
 date: today
 format:
@@ -28,25 +28,24 @@ execute:
 
 This notebook covers **Step 1** of the mass cytometry replication pipeline: loading,
 inspecting, and performing initial exploratory data analysis (EDA) on the
-`Meyer_2025_TripleNegativeBreastCancer` dataset from the
+`JacksonFischer_2020_BreastCancer` dataset from the
 [imcdatasets](https://bioconductor.org/packages/imcdatasets) Bioconductor package.
 
 **Study reference:**
 
-> Meyer, Jackson et al. (2025). *A stratification system for breast cancer based
-> on basoluminal tumor cells and spatial tumor architecture.*
-> Cancer Cell 43(9):1637–1655.e9.
-> <https://doi.org/10.1016/j.ccell.2025.06.019>
+> Jackson, Fischer et al. (2020). *The single-cell pathology landscape of breast cancer.*
+> Nature 578(7796):615–620.
+> <https://doi.org/10.1038/s41586-019-1876-x>
 
 **Dataset at a glance:**
 
 | Property | Value |
 |---|---|
-| Tissue | Triple-negative breast cancer (TNBC), FFPE TMA cores |
+| Tissue | Breast cancer, FFPE TMA cores |
 | Technology | Imaging Mass Cytometry (IMC) |
-| Panel | 39 channels |
-| Full dataset | 450 images / 215 patients |
-| Subset (used here) | 125 images / 60 patients |
+| Panel | 42 channels |
+| Full dataset | 285,851 cells × 42 channels (Basel + Zurich cohorts) |
+| Subset (used here) | 100 images / 100 patients (Basel cohort) |
 | Data format | `SingleCellExperiment`, `SpatialExperiment`, `CytoImageList` |
 
 ::: {.callout-important}
@@ -54,7 +53,7 @@ inspecting, and performing initial exploratory data analysis (EDA) on the
 
 These settings are optimised for a **16 GB RAM** environment (WSL2).
 Multichannel images are stored on disk as HDF5 files (`data/h5_cache/`) to
-avoid loading ~21 GB into RAM. Only the 125-image **subset** is used for
+avoid loading ~19 GB into RAM. Only the 100-image **Basel subset** is used for
 image-level operations.
 :::
 
@@ -116,13 +115,14 @@ dir.create(h5_dir, recursive = TRUE, showWarnings = FALSE)
 ### Single-cell data (SCE)
 
 The `SingleCellExperiment` object holds per-cell expression values and all
-cell- and patient-level metadata. Loading the **subset** (`full_dataset = FALSE`)
-keeps memory usage at ~451 MB — well within our 16 GB limit.
+cell- and patient-level metadata. Loading the **Basel subset** (`full_dataset = FALSE`,
+`cohort = "Basel"`) keeps memory usage at ~513 MB — well within our 16 GB limit.
 
 ```{r load-sce}
-sce <- Meyer_2025_TripleNegativeBreastCancer(
+sce <- JacksonFischer_2020_BreastCancer(
     data_type    = "sce",
-    full_dataset = FALSE   # 125 images / 60 patients
+    full_dataset = FALSE,
+    cohort       = "Basel"
 )
 sce
 ```
@@ -134,9 +134,10 @@ single-cell data to be spatially placed. We use HDF5 on-disk storage to
 keep RAM usage low.
 
 ```{r load-masks}
-masks <- Meyer_2025_TripleNegativeBreastCancer(
+masks <- JacksonFischer_2020_BreastCancer(
     data_type    = "masks",
     full_dataset = FALSE,
+    cohort       = "Basel",
     on_disk      = TRUE,
     h5FilesPath  = h5_dir
 )
@@ -153,10 +154,11 @@ Images are downloaded from ExperimentHub and written to HDF5 files in
 :::
 
 ```{r load-images}
-images <- Meyer_2025_TripleNegativeBreastCancer(
+images <- JacksonFischer_2020_BreastCancer(
     data_type   = "images",
+    cohort      = "Basel",
     on_disk     = TRUE,
-    h5FilesPath = h5_dir   # REQUIRED on 16 GB — in-memory needs ~21 GB
+    h5FilesPath = h5_dir   # REQUIRED on 16 GB — in-memory needs ~19 GB
 )
 images
 ```
@@ -205,7 +207,7 @@ assayNames(sce)
 |---|---|
 | `counts` | Raw mean ion counts per cell |
 | `exprs` | asinh-transformed counts (cofactor = 1) |
-| `min_max` | Min–max normalised to [0, 1] |
+| `quant_norm` | Quantile-normalised counts (0 to 1, 99th percentile) |
 
 ### Cell-level metadata (colData)
 
@@ -230,7 +232,7 @@ as.data.frame(rowData(sce))
 
 ### Cells per image
 
-How many cells were segmented in each of the 125 TMA cores?
+How many cells were segmented in each of the 100 TMA cores?
 
 ```{r cells-per-image-summary}
 cells_per_image <- as.data.frame(colData(sce)) |>
@@ -261,33 +263,33 @@ ggplot(cells_per_image,
     theme(axis.text.y = element_text(size = 6))
 ```
 
-### Patient group representation
+### Tumour grade representation
 
-How are cells distributed across the patient groups defined in the study?
+How are cells distributed across the tumour grades defined in the study?
 
 ```{r patient-groups}
-cat("Cells per patient group:\n")
-print(table(sce$patient_patientgroup))
+cat("Cells per tumour grade:\n")
+print(table(sce$tumor_grade))
 
-cat(sprintf("\nUnique patients: %d\n", length(unique(sce$patient_id))))
+cat(sprintf("\nUnique images: %d\n", length(unique(sce$image_name))))
 ```
 
 ```{r fig-patient-groups}
 #| label: fig-patient-groups
-#| fig-cap: "Total cell count per patient, broken down by patient group. Each point represents one patient. Violin shape shows the distribution across patients within each group."
+#| fig-cap: "Total cell count per image, broken down by tumour grade. Each point represents one image. Violin shape shows the distribution across images within each grade."
 
-cells_per_patient <- as.data.frame(colData(sce)) |>
-    dplyr::count(patient_id, patient_patientgroup, name = "n_cells")
+cells_per_image_grade <- as.data.frame(colData(sce)) |>
+    dplyr::count(image_name, tumor_grade, name = "n_cells")
 
-ggplot(cells_per_patient,
-       aes(x = patient_patientgroup, y = n_cells,
-           fill = patient_patientgroup)) +
+ggplot(cells_per_image_grade,
+       aes(x = tumor_grade, y = n_cells,
+           fill = tumor_grade)) +
     geom_violin(alpha = 0.6, colour = "grey40") +
     geom_jitter(width = 0.15, size = 1.5, alpha = 0.7, colour = "grey20") +
     labs(
-        title    = "Total cells per patient by group",
-        subtitle = "Each point = one patient",
-        x = "Patient group", y = "Total cell count"
+        title    = "Total cells per image by tumour grade",
+        subtitle = "Each point = one image",
+        x = "Tumour grade", y = "Total cell count"
     ) +
     theme_bw(base_size = 12) +
     theme(legend.position = "none",
@@ -298,7 +300,7 @@ ggplot(cells_per_patient,
 
 ```{r fig-panel}
 #| label: fig-panel
-#| fig-cap: "39-channel IMC antibody panel. Each point is one marker; the metal tag (channel name) is shown to the right."
+#| fig-cap: "42-channel IMC antibody panel. Each point is one marker; the metal tag (channel name) is shown to the right."
 
 panel <- as.data.frame(rowData(sce))
 

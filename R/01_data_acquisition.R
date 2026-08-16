@@ -2,17 +2,18 @@
 # Step 1: Data Acquisition & Inspection
 # =============================================================================
 #
-# Study: Meyer et al. (2025). A stratification system for breast cancer based
-#        on basoluminal tumor cells and spatial tumor architecture.
-#        Cancer Cell 43(9):1637-1655.e9.
-#        https://doi.org/10.1016/j.ccell.2025.06.019
+# Study: Jackson, Fischer et al. (2020). The single-cell pathology landscape
+#        of breast cancer.
+#        Nature 578(7796):615-620.
+#        https://doi.org/10.1038/s41586-019-1876-x
 #
-# Dataset: Meyer_2025_TripleNegativeBreastCancer (imcdatasets v1)
-#   - 125-image subset (60 patients) used for image/mask loading (16 GB RAM)
-#   - 39-channel IMC panel, FFPE TMA cores
+# Dataset: JacksonFischer_2020_BreastCancer (imcdatasets)
+#   - Basel cohort subset (100 images / 100 patients) used for image/mask
+#     loading (16 GB RAM); in-memory images need ~19 GB
+#   - 42-channel IMC panel, FFPE TMA cores
 #
 # Outputs (written to results/):
-#   - sce_raw.rds          : raw SingleCellExperiment (subset)
+#   - sce_raw.rds          : raw SingleCellExperiment (Basel subset)
 #   - acquisition_summary/ : plain-text and CSV summaries
 # =============================================================================
 
@@ -47,17 +48,18 @@ cat("STEP 1: Data Acquisition & Inspection\n")
 cat(rep("=", 70), "\n\n", sep = "")
 
 
-# ── 1a. Load single-cell data (subset: 125 images / 60 patients) ──────────────
+# ── 1a. Load single-cell data (Basel subset: 100 images / 100 patients) ───────
 #
-# Memory: ~451 MB in RAM — safe on 16 GB
-# full_dataset = FALSE  →  subset recommended for publication figures
-# full_dataset = TRUE   →  1.6 GB, usable for SCE-only steps if needed
+# Memory: ~513 MB in RAM — safe on 16 GB
+# full_dataset = FALSE + cohort = "Basel"  →  100-image Basel subset
+# full_dataset = TRUE                      →  full Basel + Zurich cohorts
 
-cat("Loading SingleCellExperiment (subset) ...\n")
+cat("Loading SingleCellExperiment (Basel subset) ...\n")
 
-sce <- Meyer_2025_TripleNegativeBreastCancer(
+sce <- JacksonFischer_2020_BreastCancer(
     data_type    = "sce",
-    full_dataset = FALSE
+    full_dataset = FALSE,
+    cohort       = "Basel"
 )
 
 cat("  Done.\n\n")
@@ -72,9 +74,10 @@ h5_dir <- file.path("data", "h5_cache")
 
 cat("Loading segmentation masks (on-disk HDF5) ...\n")
 
-masks <- Meyer_2025_TripleNegativeBreastCancer(
+masks <- JacksonFischer_2020_BreastCancer(
     data_type    = "masks",
     full_dataset = FALSE,
+    cohort       = "Basel",
     on_disk      = TRUE,
     h5FilesPath  = h5_dir
 )
@@ -84,19 +87,19 @@ cat("  Done.\n\n")
 
 # ── 1c. Load multichannel images (on-disk HDF5 — required on 16 GB) ───────────
 #
-# WARNING: Images require ~20.9 GB in RAM (full, in-memory).
+# WARNING: Images require ~19 GB in RAM (Basel, in-memory).
 # on_disk = TRUE writes HDF5 files to h5_dir so only small chunks are read
 # during downstream operations.  This is mandatory on 16 GB hardware.
 #
-# Note: only the 125-image subset is available as images; full_dataset = TRUE
-# is not supported for data_type = "images".
+# Note: full_dataset = TRUE is not supported for data_type = "images".
 
 cat("Loading multichannel images (on-disk HDF5) ...\n")
 cat("  [This may take 10-30 min on first run — HDF5 files are written to",
     h5_dir, "]\n")
 
-images <- Meyer_2025_TripleNegativeBreastCancer(
+images <- JacksonFischer_2020_BreastCancer(
     data_type   = "images",
+    cohort      = "Basel",
     on_disk     = TRUE,
     h5FilesPath = h5_dir
 )
@@ -173,19 +176,17 @@ cells_per_image <- as.data.frame(colData(sce)) |>
 cat("\nCells per image (summary across", nrow(cells_per_image), "images):\n")
 print(summary(cells_per_image$n_cells))
 
-# --- Patients ---
-n_patients <- length(unique(sce$patient_id))
-cat(sprintf("\nUnique patients in subset: %d\n", n_patients))
+cat(sprintf("Unique images in subset: %d\n", length(unique(sce$image_name))))
 
-# --- Patient groups ---
-cat("\nCells per patient group:\n")
-print(table(sce$patient_patientgroup))
+# --- Tumour grades ---
+cat("\nCells per tumour grade:\n")
+print(table(sce$tumor_grade))
 
-# --- Cells per patient ---
-cells_per_patient <- as.data.frame(colData(sce)) |>
-    dplyr::count(patient_id, name = "n_cells")
-cat("\nCells per patient (summary):\n")
-print(summary(cells_per_patient$n_cells))
+# --- Cells per image ---
+cells_per_image_grade <- as.data.frame(colData(sce)) |>
+    dplyr::count(image_name, tumor_grade, name = "n_cells")
+cat("\nCells per image (summary):\n")
+print(summary(cells_per_image_grade$n_cells))
 
 # --- Marker panel ---
 panel <- as.data.frame(rowData(sce))
@@ -222,7 +223,7 @@ p_cells_per_image <- ggplot(cells_per_image,
     coord_flip() +
     labs(
         title    = "Step 1 — Cells per image",
-        subtitle = sprintf("Meyer_2025_TripleNegativeBreastCancer subset  |  n = %d images",
+        subtitle = sprintf("JacksonFischer_2020_BreastCancer (Basel)  |  n = %d images",
                            nrow(cells_per_image)),
         x        = "Image",
         y        = "Cell count"
@@ -237,19 +238,16 @@ ggsave(
 )
 cat("  Saved: figures/01_acquisition/cells_per_image.pdf\n")
 
-# --- Figure 2: Cells per patient group (violin + jitter) ---
-cells_per_patient_group <- as.data.frame(colData(sce)) |>
-    dplyr::count(patient_id, patient_patientgroup, name = "n_cells")
-
-p_group <- ggplot(cells_per_patient_group,
-                  aes(x = patient_patientgroup, y = n_cells,
-                      fill = patient_patientgroup)) +
+# --- Figure 2: Cells per image by tumour grade (violin + jitter) ---
+p_group <- ggplot(cells_per_image_grade,
+                  aes(x = tumor_grade, y = n_cells,
+                      fill = tumor_grade)) +
     geom_violin(alpha = 0.6, colour = "grey40") +
     geom_jitter(width = 0.15, size = 1.2, alpha = 0.7, colour = "grey20") +
     labs(
-        title    = "Step 1 — Total cells per patient by group",
-        subtitle = "Each point = one patient",
-        x        = "Patient group",
+        title    = "Step 1 — Total cells per image by tumour grade",
+        subtitle = "Each point = one image",
+        x        = "Tumour grade",
         y        = "Total cell count"
     ) +
     theme_bw(base_size = 11) +
