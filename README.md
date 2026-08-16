@@ -1,14 +1,14 @@
 # Mass Cytometry Explorations
 
-Replication analysis of the Meyer et al. (2025) study:
+Replication analysis of the Jackson, Fischer et al. (2020) study:
 
-> Meyer, Jackson et al. (2025). *A stratification system for breast cancer based on basoluminal tumor cells and spatial tumor architecture.* Cancer Cell 43(9):1637–1655.e9. https://doi.org/10.1016/j.ccell.2025.06.019
+> Jackson, Fischer et al. (2020). *The single-cell pathology landscape of breast cancer.* Nature 578(7796):615–620. https://doi.org/10.1038/s41586-019-1876-x
 
-Data are loaded from the `imcdatasets` Bioconductor package using the `Meyer_2025_TripleNegativeBreastCancer` dataset.
+Data are loaded from the `imcdatasets` Bioconductor package using the `JacksonFischer_2020_BreastCancer` dataset.
 
 ## Hardware requirements
 
-These scripts are configured for a **16 GB RAM** environment (e.g. WSL2). Images are stored on disk via HDF5 to avoid loading ~21 GB into memory. The **subset dataset** (`full_dataset = FALSE`, 125 images / 60 patients) is used for all image-level and spatial analyses; the full SCE (`full_dataset = TRUE`, 450 images / 215 patients) is used for single-cell-level steps only.
+These scripts are configured for a **16 GB RAM** environment (e.g. WSL2). Images are stored on disk via HDF5 to avoid loading ~19 GB into memory. The **Basel subset** (`full_dataset = FALSE`, `cohort = "Basel"`, 100 images / 100 patients) is used for all image-level and spatial analyses; the full SCE (`full_dataset = TRUE`, Basel + Zurich cohorts) is used for single-cell-level steps only.
 
 Recommended `.wslconfig` settings:
 ```ini
@@ -88,5 +88,5 @@ Intermediate objects are saved to `results/` so each step can be re-run independ
 
 Please cite the original study and the `imcdatasets` package:
 
-- Meyer, Jackson et al. (2025). Cancer Cell 43(9):1637–1655.e9.
+- Jackson, Fischer et al. (2020). Nature 578(7796):615–620.
 - Damond N, Steenbuck N, Eling N, Fischer J, Hoch T, Meyer L (2026). *imcdatasets: Collection of publicly available imaging mass cytometry (IMC) datasets.*
