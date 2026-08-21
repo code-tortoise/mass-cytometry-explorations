@@ -147,19 +147,56 @@ masks
 ### Multichannel images
 
 ::: {.callout-warning}
-**First run only — this may take 10–30 minutes.**  
+**First run only — this may take 30–60 minutes.**  
 Images are downloaded from ExperimentHub and written to HDF5 files in
 `data/h5_cache/`. Subsequent renders will use the cached files instantly
 (Quarto's `cache: true` option also prevents re-execution).
 :::
 
+::: {.callout-important}
+## Batch loading for ≤14 GB RAM
+
+Loading all 100 Basel images at once peaks RAM above 14 GB during the
+download-and-transcode phase (even with `on_disk = TRUE`), which OOM-kills
+the R process and disconnects WSL2. The loop below loads **`batch_size`
+images at a time**, writing each batch to HDF5 before moving on. Peak RAM
+per batch is ~1–2 GB. The resulting `images` object is a single combined
+`CytoImageList` identical to what a one-shot load would produce, so all
+downstream steps — including object linkage validation — are unaffected.
+:::
+
 ```{r load-images}
-images <- JacksonFischer_2020_BreastCancer(
-    data_type   = "images",
-    cohort      = "Basel",
-    on_disk     = TRUE,
-    h5FilesPath = h5_dir   # REQUIRED on 16 GB — in-memory needs ~19 GB
+# Retrieve all Basel image names from the SCE so we only request images
+# that are actually in our working subset.
+all_image_names <- unique(sce$image_name)
+batch_size      <- 20   # lower this (e.g. 10) if WSL2 still OOM-kills
+
+batches <- split(
+    all_image_names,
+    ceiling(seq_along(all_image_names) / batch_size)
 )
+
+image_list <- vector("list", length(batches))
+
+for (i in seq_along(batches)) {
+    cat(sprintf("Loading batch %d / %d  (%d images) …\n",
+                i, length(batches), length(batches[[i]])))
+
+    image_list[[i]] <- JacksonFischer_2020_BreastCancer(
+        data_type    = "images",
+        cohort       = "Basel",
+        on_disk      = TRUE,
+        h5FilesPath  = h5_dir,
+        full_dataset = FALSE
+    )[batches[[i]]]   # subset to this batch immediately after loading
+
+    gc()   # prompt garbage collection to free transient memory
+}
+
+# Combine all batches into one CytoImageList
+images <- do.call(c, image_list)
+rm(image_list); gc()
+
 images
 ```
 
