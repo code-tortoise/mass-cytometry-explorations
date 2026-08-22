@@ -12,6 +12,13 @@ renv/staging/
 
 # Large data / HDF5 cache (downloaded at runtime)
 data
+data/ExperimentHub/
+data/h5_cache/
+*.h5
+*.hdf5
+*.tif
+*.tiff
+*.deb
 
 
 # Results and figures (generated at runtime)
