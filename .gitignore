@@ -11,8 +11,8 @@ renv/python/
 renv/staging/
 
 # Large data / HDF5 cache (downloaded at runtime)
-data/h5_cache/
-data/*.h5
+data
+
 
 # Results and figures (generated at runtime)
 results/
