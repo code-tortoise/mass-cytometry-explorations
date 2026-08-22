@@ -1,0 +1,13 @@
+matrixStats
+MatrixGenerics
+BiocGenerics
+S4Vectors
+IRanges
+GenomeInfoDb
+GenomicRanges
+Biobase
+SummarizedExperiment
+SingleCellExperiment
+ggplot2
+dplyr
+patchwork
