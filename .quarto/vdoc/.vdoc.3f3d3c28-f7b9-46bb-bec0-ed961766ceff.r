@@ -1,82 +1,82 @@
----
-title: "Step 1 — Data Acquisition & Inspection"
-subtitle: "Jackson & Fischer et al. (2020) Breast Cancer | imcdatasets"
-author: "mass-cytometry-explorations"
-date: today
-format:
-  html:
-    toc: true
-    toc-depth: 3
-    toc-title: "Contents"
-    number-sections: true
-    theme: cosmo
-    code-fold: false
-    code-tools: true
-    fig-width: 9
-    fig-height: 6
-    embed-resources: true   # single self-contained HTML file
-conda:
-  environment: mass-cytometry
-execute:
-  echo: true          # show all code
-  warning: false
-  message: false
-  cache: true         # cache slow download steps across renders
----
-
-## Overview
-
-This notebook covers **Step 1** of the mass cytometry replication pipeline: loading,
-inspecting, and performing initial exploratory data analysis (EDA) on the
-`JacksonFischer_2020_BreastCancer` dataset from the
-[imcdatasets](https://bioconductor.org/packages/imcdatasets) Bioconductor package.
-
-**Study reference:**
-
-> Jackson, Fischer et al. (2020). *The single-cell pathology landscape of breast cancer.*
-> Nature 578(7796):615–620.
-> <https://doi.org/10.1038/s41586-019-1876-x>
-
-**Dataset at a glance:**
-
-| Property | Value |
-|---|---|
-| Tissue | Breast cancer, FFPE TMA cores |
-| Technology | Imaging Mass Cytometry (IMC) |
-| Panel | 42 channels |
-| Full dataset | 285,851 cells × 42 channels (Basel + Zurich cohorts) |
-| Subset (used here) | 100 images / 100 patients (Basel cohort) |
-| Data format | `SingleCellExperiment`, `SpatialExperiment`, `CytoImageList` |
-
-::: {.callout-important}
-## 16 GB RAM constraint
-
-These settings are optimised for a **16 GB RAM** environment (WSL2).
-Multichannel images are stored on disk as HDF5 files (`data/h5_cache/`) to
-avoid loading ~19 GB into RAM. Only the 100-image **Basel subset** is used for
-image-level operations.
-:::
-
----
-
-## Setup
-<!--- Installing packages into R using this 
-`install.packages(c("ggplot2", "dplyr", "patchwork", "jsonlite"))`
-`if (!requireNamespace("BiocManager", quietly = TRUE))
-    install.packages("BiocManager")
-
-BiocManager::install(c(
-    "imcdatasets",        # the dataset itself
-    "SingleCellExperiment", # single-cell analysis
-    "SpatialExperiment", # single-cell spatial analysis
-    "cytomapper",         # CytoImageList + image handling
-    "HDF5Array",          # on-disk HDF5 storage for images
-    "ExperimentHub"       # download hub for imcdatasets
-))
-`BiocManager::install("imcdatasets")` -->
-### Load packages
-
-```{r setup}
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
 suppressPackageStartupMessages({
     library(imcdatasets)
     library(SingleCellExperiment)
@@ -98,11 +98,11 @@ if (!identical(normalizePath(getwd()), normalizePath(target_dir))) {
 
 # Confirm current working directory
 cat("Working directory:", getwd(), "\n")
-```
-
-### Configure paths
-
-```{r paths}
+#
+#
+#
+#
+#
 # Pin ExperimentHub cache to the project directory so data is only
 # downloaded once and reused across sessions.
 Sys.setenv(EXPERIMENT_HUB_CACHE = file.path(getwd(), "..", "data", "ExperimentHub"))
@@ -116,34 +116,34 @@ dir.create(file.path("..", "results", "acquisition_summary"),
 dir.create(file.path("..", "figures", "01_acquisition"),
            recursive = TRUE, showWarnings = FALSE)
 dir.create(h5_dir, recursive = TRUE, showWarnings = FALSE)
-```
-
----
-
-## Load Data
-
-### Single-cell data (SCE)
-
-The `SingleCellExperiment` object holds per-cell expression values and all
-cell- and patient-level metadata. Loading the **Basel subset** (`full_dataset = FALSE`,
-`cohort = "Basel"`) keeps memory usage at ~513 MB — well within our 16 GB limit.
-
-```{r load-sce}
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
 sce <- JacksonFischer_2020_BreastCancer(
     data_type    = "sce",
     full_dataset = FALSE,
     cohort       = "Basel"
 )
 sce
-```
-
-### Cell segmentation masks
-
-Masks map every pixel in the tissue image to a cell number, allowing
-single-cell data to be spatially placed. We use HDF5 on-disk storage to
-keep RAM usage low.
-
-```{r load-masks}
+#
+#
+#
+#
+#
+#
+#
+#
+#
 masks <- JacksonFischer_2020_BreastCancer(
     data_type    = "masks",
     full_dataset = FALSE,
@@ -153,30 +153,30 @@ masks <- JacksonFischer_2020_BreastCancer(
     force = TRUE
 )
 masks
-```
-
-### Multichannel images
-
-::: {.callout-warning}
-**First run only — this may take 30–60 minutes.**  
-Images are downloaded from ExperimentHub and written to HDF5 files in
-`data/h5_cache/`. Subsequent renders will use the cached files instantly
-(Quarto's `cache: true` option also prevents re-execution).
-:::
-
-::: {.callout-important}
-## Batch loading for ≤14 GB RAM
-
-Loading all 100 Basel images at once peaks RAM above 14 GB during the
-download-and-transcode phase (even with `on_disk = TRUE`), which OOM-kills
-the R process and disconnects WSL2. The loop below loads **`batch_size`
-images at a time**, writing each batch to HDF5 before moving on. Peak RAM
-per batch is ~1–2 GB. The resulting `images` object is a single combined
-`CytoImageList` identical to what a one-shot load would produce, so all
-downstream steps — including object linkage validation — are unaffected.
-:::
-
-```{r load-images}
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
 # Retrieve all Basel image names from the SCE so we only request images
 # that are actually in our working subset.
 all_image_names <- unique(sce$image_name)
@@ -209,16 +209,16 @@ images <- do.call(c, image_list)
 rm(image_list); gc() 
 
 images
-```
-
----
-
-## Validate Object Linkage
-
-All three objects are linked by `image_name`. A mismatch here means a
-version issue or incomplete download — we check this before proceeding.
-
-```{r validate-linkage}
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
 sce_names    <- unique(sce$image_name)
 images_names <- mcols(images)$image_name
 masks_names  <- mcols(masks)$image_name
@@ -237,59 +237,59 @@ cat(sprintf("Masks  → SCE : %s  (%d / %d matched)\n",
 if (!ok_img || !ok_mask) {
     stop("Linkage validation FAILED — check dataset version or re-download.")
 }
-```
-
----
-
-## Structural Inspection
-
-### Assay slots
-
-The SCE contains three pre-computed assays:
-
-```{r assay-names}
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
 assayNames(sce)
-```
-
-| Assay | Description |
-|---|---|
-| `counts` | Raw mean ion counts per cell |
-| `exprs` | asinh-transformed counts (cofactor = 1) |
-| `quant_norm` | Quantile-normalised counts (0 to 1, 99th percentile) |
-
-### Cell-level metadata (colData)
-
-These columns describe each cell and link it to its image, patient, and
-biological annotation:
-
-```{r coldata}
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
 names(colData(sce))
-```
-
-### Marker panel (rowData)
-
-Each row of the SCE is one IMC channel (marker):
-
-```{r rowdata}
+#
+#
+#
+#
+#
+#
+#
 as.data.frame(rowData(sce))
-```
-
----
-
-## Exploratory Data Analysis
-
-### Cells per image
-
-How many cells were segmented in each of the 100 TMA cores?
-
-```{r cells-per-image-summary}
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
 cells_per_image <- as.data.frame(colData(sce)) |>
     dplyr::count(image_name, name = "n_cells")
 
 summary(cells_per_image$n_cells)
-```
-
-```{r fig-cells-per-image, fig.height=10}
+#
+#
+#
 #| label: fig-cells-per-image
 #| fig-cap: "Cells per image, sorted ascending. The dashed red line marks a typical QC threshold of 100 cells — images below this may represent failed or poor-quality acquisitions."
 
@@ -309,20 +309,20 @@ ggplot(cells_per_image,
     ) +
     theme_bw(base_size = 9) +
     theme(axis.text.y = element_text(size = 6))
-```
-
-### Tumour grade representation
-
-How are cells distributed across the tumour grades defined in the study?
-
-```{r patient-groups}
+#
+#
+#
+#
+#
+#
+#
 cat("Cells per tumour grade:\n")
 print(table(sce$tumor_grade))
 
 cat(sprintf("\nUnique images: %d\n", length(unique(sce$image_name))))
-```
-
-```{r fig-patient-groups}
+#
+#
+#
 #| label: fig-patient-groups
 #| fig-cap: "Total cell count per image, broken down by tumour grade. Each point represents one image. Violin shape shows the distribution across images within each grade."
 
@@ -342,11 +342,11 @@ ggplot(cells_per_image_grade,
     theme_bw(base_size = 12) +
     theme(legend.position = "none",
           axis.text.x     = element_text(angle = 30, hjust = 1))
-```
-
-### Antibody panel
-
-```{r fig-panel}
+#
+#
+#
+#
+#
 #| label: fig-panel
 #| fig-cap: "42-channel IMC antibody panel. Each point is one marker; the metal tag (channel name) is shown to the right."
 
@@ -372,13 +372,13 @@ if (all(c("channel_name", "marker_name") %in% colnames(panel))) {
               axis.ticks.x = element_blank(),
               panel.grid.x = element_blank())
 }
-```
-
----
-
-## Save Outputs
-
-```{r save-outputs}
+#
+#
+#
+#
+#
+#
+#
 # Marker panel → CSV
 write.csv(panel,
           file = file.path("..", "results", "acquisition_summary",
@@ -400,21 +400,24 @@ cat("  results/acquisition_summary/marker_panel.csv\n")
 cat("  results/acquisition_summary/cells_per_image.csv\n")
 cat(sprintf("  results/sce_raw.rds  (%d cells × %d markers)\n",
             ncol(sce), nrow(sce)))
-```
-
----
-
-## Session Information
-
-```{r session-info}
+#
+#
+#
+#
+#
+#
+#
 sessionInfo()
-```
-
----
-
-::: {.callout-tip}
-## Next step
-
-Proceed to **[Step 2 — Quality Control](02_quality_control.qmd)** to filter
-low-quality cells and images before dimensionality reduction and clustering.
-:::
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
