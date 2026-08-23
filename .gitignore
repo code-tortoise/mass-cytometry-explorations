@@ -19,6 +19,7 @@ data/h5_cache/
 *.tif
 *.tiff
 *.deb
+*_cache/
 
 
 # Results and figures (generated at runtime)
