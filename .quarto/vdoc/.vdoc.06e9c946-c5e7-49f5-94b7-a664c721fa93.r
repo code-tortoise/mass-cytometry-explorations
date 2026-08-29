@@ -1,0 +1,315 @@
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+# Load required packages.
+suppressPackageStartupMessages({
+  library(SingleCellExperiment)
+  library(ggplot2)
+  library(dplyr)
+  library(patchwork)
+})
+# Desired working directory.
+target_dir <- "/home/lizalfos/mass-cytometry-explorations/notebooks"
+
+# Check current working directory and switch if needed.
+if (!identical(normalizePath(getwd()), normalizePath(target_dir))) {
+    setwd(target_dir)
+}
+
+# Confirm current working directory.
+cat("Working directory:", getwd(), "\n")
+#
+#
+#
+# Create correct file paths for first run.
+dir.create(file.path("..", "results", "qc_summary"),
+           recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path("..", "figures", "02_quality_control"),
+           recursive = TRUE, showWarnings = FALSE)
+#
+#
+#
+#
+#
+#
+#
+# Validating presence of data for quality control.
+sce_path <- file.path("..", "results", "sce_raw.rds")
+if (!file.exists(sce_path)) {
+  stop("Missing results/sce_raw.rds. Please render notebooks/01_data_acquisition.qmd first.")
+}
+
+sce <- readRDS(sce_path)
+sce
+#
+#
+#
+#
+#
+#
+#
+#
+#
+# QC thresholds.
+min_cells_per_image <- 100L
+low_mad_multiplier_total <- 3
+high_mad_multiplier_total <- 5
+low_mad_multiplier_detected <- 3
+low_prevalence_pct <- 1
+#
+#
+#
+#
+#
+#
+#
+# Grabs single-cell metadata and counts cells per image, flagging images with too few cells into its own dataframe.
+cells_per_image <- as.data.frame(colData(sce)) |>
+  dplyr::count(image_name, name = "n_cells") |>
+  dplyr::mutate(
+    fail_image_qc = n_cells < min_cells_per_image
+  )
+# From this dataframe then we remove images that fail QC and store the names of the images to keep in a vector. No images fail QC.
+keep_images <- cells_per_image |>
+  dplyr::filter(!fail_image_qc) |>
+  dplyr::pull(image_name)
+
+# Displays the number of images that failed QC.
+cells_per_image |>
+  dplyr::summarise(
+    images_total = dplyr::n(),
+    images_fail = sum(fail_image_qc),
+    images_keep = sum(!fail_image_qc)
+  )
+#
+#
+#
+#| fig-cap: "Cell counts per image. Red bars are image-level QC failures."  
+ggplot(cells_per_image,
+       aes(x = reorder(image_name, n_cells), y = n_cells, fill = fail_image_qc)) +
+  geom_col(width = 0.7) +
+  geom_hline(yintercept = min_cells_per_image, linetype = "dashed", colour = "red") +
+  coord_flip() +
+  scale_fill_manual(values = c("FALSE" = "steelblue", "TRUE" = "firebrick")) +
+  labs(
+    title = "Image-level QC",
+    subtitle = sprintf("Threshold: at least %d cells per image", min_cells_per_image),
+    x = NULL, y = "Cell count", fill = "Fail QC"
+  ) +
+  theme_bw(base_size = 9) +
+  theme(axis.text.y = element_text(size = 6))
+#
+#
+#
+#
+#
+#
+#
+counts_mat <- assay(sce, "counts")
+
+cell_total_counts <- colSums(counts_mat, na.rm = TRUE)
+cell_detected_markers <- colSums(counts_mat > 0, na.rm = TRUE)
+
+low_total_threshold <- median(cell_total_counts) -
+  low_mad_multiplier_total * mad(cell_total_counts)
+high_total_threshold <- median(cell_total_counts) +
+  high_mad_multiplier_total * mad(cell_total_counts)
+low_detected_threshold <- median(cell_detected_markers) -
+  low_mad_multiplier_detected * mad(cell_detected_markers)
+
+low_total_threshold <- max(low_total_threshold, 1)
+low_detected_threshold <- max(low_detected_threshold, 1)
+
+cell_qc <- data.frame(
+  cell_id = colnames(sce),
+  image_name = sce$image_name,
+  total_counts = cell_total_counts,
+  detected_markers = cell_detected_markers,
+  fail_low_total = cell_total_counts < low_total_threshold,
+  fail_high_total = cell_total_counts > high_total_threshold,
+  fail_low_detected = cell_detected_markers < low_detected_threshold
+) |>
+  dplyr::mutate(
+    fail_cell_qc = fail_low_total | fail_high_total | fail_low_detected
+  )
+
+cell_qc |>
+  dplyr::summarise(
+    cells_total = dplyr::n(),
+    cells_fail = sum(fail_cell_qc),
+    cells_keep = sum(!fail_cell_qc)
+  )
+#
+#
+#
+#| fig-cap: "Distribution of total ion counts per cell with low/high QC thresholds."
+ggplot(cell_qc, aes(x = total_counts)) +
+  geom_histogram(bins = 80, fill = "grey60", colour = "white") +
+  geom_vline(xintercept = low_total_threshold, colour = "firebrick", linetype = "dashed") +
+  geom_vline(xintercept = high_total_threshold, colour = "firebrick", linetype = "dashed") +
+  labs(
+    title = "Cell-level QC: total counts",
+    subtitle = "Dashed lines = fail thresholds",
+    x = "Total counts per cell", y = "Number of cells"
+  ) +
+  theme_bw()
+#
+#
+#
+#| fig-cap: "Relationship between detected markers and total counts. Red points fail cell-level QC."
+ggplot(cell_qc, aes(x = detected_markers, y = total_counts, colour = fail_cell_qc)) +
+  geom_point(alpha = 0.35, size = 0.6) +
+  scale_colour_manual(values = c("FALSE" = "grey40", "TRUE" = "firebrick")) +
+  labs(
+    title = "Cell-level QC flags",
+    x = "Detected markers per cell", y = "Total counts per cell", colour = "Fail QC"
+  ) +
+  theme_bw()
+#
+#
+#
+#
+#
+#
+#
+exprs_assay <- if ("exprs" %in% assayNames(sce)) assay(sce, "exprs") else counts_mat
+
+marker_qc <- data.frame(
+  marker_name = rownames(sce),
+  mean_expr = rowMeans(exprs_assay),
+  median_expr = apply(exprs_assay, 1, median),
+  pct_cells_nonzero = rowMeans(counts_mat > 0) * 100
+) |>
+  dplyr::mutate(
+    fail_low_prevalence = pct_cells_nonzero < low_prevalence_pct
+  ) |>
+  dplyr::arrange(pct_cells_nonzero)
+
+marker_qc |>
+  dplyr::summarise(
+    markers_total = dplyr::n(),
+    markers_low_prevalence = sum(fail_low_prevalence)
+  )
+#
+#
+#
+#| fig-cap: "Percent of cells with non-zero signal for each marker."
+ggplot(marker_qc,
+       aes(x = reorder(marker_name, pct_cells_nonzero),
+           y = pct_cells_nonzero,
+           fill = fail_low_prevalence)) +
+  geom_col(width = 0.7) +
+  geom_hline(yintercept = low_prevalence_pct, colour = "firebrick", linetype = "dashed") +
+  coord_flip() +
+  scale_fill_manual(values = c("FALSE" = "steelblue", "TRUE" = "firebrick")) +
+  labs(
+    title = "Marker-level QC",
+    subtitle = sprintf("Low-prevalence threshold: %.1f%% of cells", low_prevalence_pct),
+    x = NULL, y = "% cells with non-zero signal", fill = "Fail QC"
+  ) +
+  theme_bw(base_size = 9)
+#
+#
+#
+#
+#
+#
+#
+keep_cells <- (!cell_qc$fail_cell_qc) & (cell_qc$image_name %in% keep_images)
+sce_qc <- sce[, keep_cells]
+
+cat(sprintf("Cells before QC: %d\n", ncol(sce)))
+cat(sprintf("Cells after QC:  %d\n", ncol(sce_qc)))
+cat(sprintf("Markers retained: %d\n", nrow(sce_qc)))
+#
+#
+#
+#
+#
+#
+#
+write.csv(cells_per_image,
+          file = file.path("..", "results", "qc_summary", "cells_per_image_qc.csv"),
+          row.names = FALSE)
+
+write.csv(cell_qc,
+          file = file.path("..", "results", "qc_summary", "cell_qc_metrics.csv"),
+          row.names = FALSE)
+
+write.csv(marker_qc,
+          file = file.path("..", "results", "qc_summary", "marker_qc_metrics.csv"),
+          row.names = FALSE)
+
+saveRDS(sce_qc, file = file.path("..", "results", "sce_qc_filtered.rds"))
+
+cat("Saved:\n")
+cat("  results/qc_summary/cells_per_image_qc.csv\n")
+cat("  results/qc_summary/cell_qc_metrics.csv\n")
+cat("  results/qc_summary/marker_qc_metrics.csv\n")
+cat("  results/sce_qc_filtered.rds\n")
+#
+#
+#
+#
+#
+#
+#
+sessionInfo()
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
