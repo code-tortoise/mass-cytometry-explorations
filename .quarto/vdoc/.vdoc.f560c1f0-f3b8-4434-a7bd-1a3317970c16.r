@@ -1,51 +1,51 @@
----
-title: "Step 2 — Quality Control"
-subtitle: "Jackson & Fischer et al. (2020) Breast Cancer | imcdatasets"
-author: "mass-cytometry-explorations"
-date: today
-format:
-  html:
-    toc: true
-    toc-depth: 3
-    toc-title: "Contents"
-    number-sections: true
-    theme: cosmo
-    code-fold: false
-    code-tools: true
-    fig-width: 9
-    fig-height: 6
-    embed-resources: true
-conda:
-  environment: mass-cytometry
-execute:
-  echo: true
-  warning: false
-  message: false
-  cache: true
----
-
-## Overview
-
-This notebook performs **Step 2** of the replication workflow: quality control (QC)
-for images, cells, and markers before downstream preprocessing and clustering.
-
-Inputs from Step 1:
-
-- `results/sce_raw.rds`
-- `results/acquisition_summary/cells_per_image.csv` (optional; recomputed here anyway)
-
-Outputs from this notebook:
-
-- `results/qc_summary/cells_per_image_qc.csv`
-- `results/qc_summary/cell_qc_metrics.csv`
-- `results/qc_summary/marker_qc_metrics.csv`
-- `results/sce_qc_filtered.rds`
-
----
-
-## Setup
-
-```{r setup}
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
 # Load required packages.
 suppressPackageStartupMessages({
   library(SingleCellExperiment)
@@ -63,21 +63,21 @@ if (!identical(normalizePath(getwd()), normalizePath(target_dir))) {
 
 # Confirm current working directory.
 cat("Working directory:", getwd(), "\n")
-```
-
-```{r paths}
+#
+#
+#
 # Create correct file paths for first run.
 dir.create(file.path("..", "results", "qc_summary"),
            recursive = TRUE, showWarnings = FALSE)
 dir.create(file.path("..", "figures", "02_quality_control"),
            recursive = TRUE, showWarnings = FALSE)
-```
-
----
-
-## Load data
-
-```{r load-sce}
+#
+#
+#
+#
+#
+#
+#
 # Validating presence of data for quality control.
 sce_path <- file.path("..", "results", "sce_raw.rds")
 if (!file.exists(sce_path)) {
@@ -86,28 +86,28 @@ if (!file.exists(sce_path)) {
 
 sce <- readRDS(sce_path)
 sce
-```
-
----
-
-## QC thresholds
-
-These thresholds are conservative defaults and can be tuned later if needed.
-
-```{r thresholds}
+#
+#
+#
+#
+#
+#
+#
+#
+#
 # QC thresholds.
 min_cells_per_image <- 100L
 low_mad_multiplier_total <- 3
 high_mad_multiplier_total <- 5
 low_mad_multiplier_detected <- 3
 low_prevalence_pct <- 1
-```
-
----
-
-## Image-level QC
-
-```{r image-qc-metrics}
+#
+#
+#
+#
+#
+#
+#
 # Grabs single-cell metadata and counts cells per image, flagging images with too few cells into its own dataframe.
 cells_per_image <- as.data.frame(colData(sce)) |>
   dplyr::count(image_name, name = "n_cells") |>
@@ -126,9 +126,9 @@ cells_per_image |>
     images_fail = sum(fail_image_qc),
     images_keep = sum(!fail_image_qc)
   )
-```
-
-```{r fig-image-qc}
+#
+#
+#
 #| fig-cap: "Cell counts per image. Red bars are image-level QC failures."  
 ggplot(cells_per_image,
        aes(x = reorder(image_name, n_cells), y = n_cells, fill = fail_image_qc)) +
@@ -143,17 +143,17 @@ ggplot(cells_per_image,
   ) +
   theme_bw(base_size = 9) +
   theme(axis.text.y = element_text(size = 6))
-```
-
----
-
-## Cell-level QC
-
-```{r cell-qc-metrics}
+#
+#
+#
+#
+#
+#
+#
 counts_mat <- assay(sce, "counts")
 
-cell_total_counts <- colSums(counts_mat, na.rm = TRUE)
-cell_detected_markers <- colSums(counts_mat > 0, na.rm = TRUE)
+cell_total_counts <- colSums(counts_mat)
+cell_detected_markers <- colSums(counts_mat > 0)
 
 low_total_threshold <- median(cell_total_counts) -
   low_mad_multiplier_total * mad(cell_total_counts)
@@ -184,9 +184,9 @@ cell_qc |>
     cells_fail = sum(fail_cell_qc),
     cells_keep = sum(!fail_cell_qc)
   )
-```
-
-```{r fig-cell-qc-1}
+#
+#
+#
 #| fig-cap: "Distribution of total ion counts per cell with low/high QC thresholds."
 ggplot(cell_qc, aes(x = total_counts)) +
   geom_histogram(bins = 80, fill = "grey60", colour = "white") +
@@ -198,9 +198,9 @@ ggplot(cell_qc, aes(x = total_counts)) +
     x = "Total counts per cell", y = "Number of cells"
   ) +
   theme_bw()
-```
-
-```{r fig-cell-qc-2}
+#
+#
+#
 #| fig-cap: "Relationship between detected markers and total counts. Red points fail cell-level QC."
 ggplot(cell_qc, aes(x = detected_markers, y = total_counts, colour = fail_cell_qc)) +
   geom_point(alpha = 0.35, size = 0.6) +
@@ -210,13 +210,13 @@ ggplot(cell_qc, aes(x = detected_markers, y = total_counts, colour = fail_cell_q
     x = "Detected markers per cell", y = "Total counts per cell", colour = "Fail QC"
   ) +
   theme_bw()
-```
-
----
-
-## Marker-level QC
-
-```{r marker-qc}
+#
+#
+#
+#
+#
+#
+#
 exprs_assay <- if ("exprs" %in% assayNames(sce)) assay(sce, "exprs") else counts_mat
 
 marker_qc <- data.frame(
@@ -235,9 +235,9 @@ marker_qc |>
     markers_total = dplyr::n(),
     markers_low_prevalence = sum(fail_low_prevalence)
   )
-```
-
-```{r fig-marker-qc}
+#
+#
+#
 #| fig-cap: "Percent of cells with non-zero signal for each marker."
 ggplot(marker_qc,
        aes(x = reorder(marker_name, pct_cells_nonzero),
@@ -253,26 +253,26 @@ ggplot(marker_qc,
     x = NULL, y = "% cells with non-zero signal", fill = "Fail QC"
   ) +
   theme_bw(base_size = 9)
-```
-
----
-
-## Apply QC filters
-
-```{r apply-qc}
+#
+#
+#
+#
+#
+#
+#
 keep_cells <- (!cell_qc$fail_cell_qc) & (cell_qc$image_name %in% keep_images)
 sce_qc <- sce[, keep_cells]
 
 cat(sprintf("Cells before QC: %d\n", ncol(sce)))
 cat(sprintf("Cells after QC:  %d\n", ncol(sce_qc)))
 cat(sprintf("Markers retained: %d\n", nrow(sce_qc)))
-```
-
----
-
-## Save outputs
-
-```{r save-outputs}
+#
+#
+#
+#
+#
+#
+#
 write.csv(cells_per_image,
           file = file.path("..", "results", "qc_summary", "cells_per_image_qc.csv"),
           row.names = FALSE)
@@ -292,21 +292,24 @@ cat("  results/qc_summary/cells_per_image_qc.csv\n")
 cat("  results/qc_summary/cell_qc_metrics.csv\n")
 cat("  results/qc_summary/marker_qc_metrics.csv\n")
 cat("  results/sce_qc_filtered.rds\n")
-```
-
----
-
-## Session information
-
-```{r session-info}
+#
+#
+#
+#
+#
+#
+#
 sessionInfo()
-```
-
----
-
-::: {.callout-tip}
-## Next step
-
-Proceed to **[Step 3 — Preprocessing](03_preprocessing.qmd)** to transform,
-normalise, and explore the QC-filtered dataset.
-:::
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
