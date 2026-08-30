@@ -53,15 +53,20 @@ suppressPackageStartupMessages({
   library(dplyr)
   library(patchwork)
 })
-# Desired working directory.
-target_dir <- "/home/lizalfos/mass-cytometry-explorations/notebooks"
 
-# Check current working directory and switch if needed.
-if (!identical(normalizePath(getwd()), normalizePath(target_dir))) {
-    setwd(target_dir)
+# Resolve project/notebook paths robustly, without absolute paths.
+if (basename(getwd()) == "notebooks") {
+  notebooks_dir <- normalizePath(getwd())
+} else if (dir.exists(file.path(getwd(), "notebooks"))) {
+  notebooks_dir <- normalizePath(file.path(getwd(), "notebooks"))
+} else {
+  stop("Run from project root or notebooks/ directory.")
 }
 
-# Confirm current working directory.
+if (!identical(normalizePath(getwd()), notebooks_dir)) {
+  setwd(notebooks_dir)
+}
+
 cat("Working directory:", getwd(), "\n")
 ```
 
