@@ -53,19 +53,19 @@ suppressPackageStartupMessages({
 })
 
 # Resolve project/notebook paths robustly, without absolute paths.
-if (basename(getwd()) == "notebooks") {
+if (basename(getwd()) == "notebooks") { # Check if running from notebooks/ directory.
   notebooks_dir <- normalizePath(getwd())
-} else if (dir.exists(file.path(getwd(), "notebooks"))) {
+} else if (dir.exists(file.path(getwd(), "notebooks"))) { # Check if running from project root.
   notebooks_dir <- normalizePath(file.path(getwd(), "notebooks"))
-} else {
+} else { # If neither then stop with an error message.
   stop("Run from project root or notebooks/ directory.")
 }
 
-if (!identical(normalizePath(getwd()), notebooks_dir)) {
+if (!identical(normalizePath(getwd()), notebooks_dir)) { # Set working directory to notebooks/ if not already there.
   setwd(notebooks_dir)
-}
+} 
 
-cat("Working directory:", getwd(), "\n")
+cat("Working directory:", getwd(), "\n") # Tell the user where the notebook is running from.
 ```
 
 ```{r paths}
@@ -98,6 +98,11 @@ The preferred assay order for downstream analysis is:
 1. `exprs` (asinh-transformed)
 2. `quant_norm` (quantile-normalised)
 3. `counts` (raw)
+
+asinh-transformed is similar to log-transformed data, but asinh is used for cytometry. This is because it handles zero and negative values gracefully, which are common in cytometry data due to background interference, while scRNA-seq data has no negative values. Log1p cannot process negative data. 
+Further reading on the topic can be found in the following references:
+<a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC11139855/">Direct comparison of mass cytometry and single-cell RNA sequencing of human peripheral blood mononuclear cells</a>
+<a href="https://doi.org/10.1038/s41592-023-01814-1"> Comparison of transformations for single-cell RNA-seq data </a>
 
 ```{r assay-selection}
 available_assays <- assayNames(sce_qc)

@@ -155,6 +155,7 @@ ggplot(cells_per_image,
 ## Cell-level QC
 
 ```{r cell-qc-metrics}
+# Using median absolute deviation to define thresholds for low and high total counts and low detected markers per cell. MAD is a great method of removing extreme values from the dataset without being overly sensitive to outliers.
 counts_mat <- assay(sce, "counts")
 
 cell_total_counts <- colSums(counts_mat, na.rm = TRUE)
