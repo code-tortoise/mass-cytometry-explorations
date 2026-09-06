@@ -1,50 +1,50 @@
----
-title: "Step 3 — Preprocessing"
-subtitle: "Jackson & Fischer et al. (2020) Breast Cancer | imcdatasets"
-author: "mass-cytometry-explorations"
-date: today
-format:
-  html:
-    toc: true
-    toc-depth: 3
-    toc-title: "Contents"
-    number-sections: true
-    theme: cosmo
-    code-fold: false
-    code-tools: true
-    fig-width: 9
-    fig-height: 6
-    embed-resources: true
-conda:
-  environment: mass-cytometry
-execute:
-  echo: true
-  warning: false
-  message: false
-  cache: true
----
-
-## Overview
-
-This notebook performs **Step 3** of the replication workflow: preprocessing the
-QC-filtered single-cell object for downstream dimensionality reduction and
-clustering.
-
-Inputs from Step 2:
-
-- `results/sce_qc_filtered.rds`
-
-Outputs from this notebook:
-
-- `results/preprocessing_summary/marker_preprocessing_metrics.csv`
-- `results/preprocessing_summary/preprocessing_parameters.csv`
-- `results/sce_preprocessed.rds`
-
----
-
-## Setup
-
-```{r setup}
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
 suppressPackageStartupMessages({
   library(SingleCellExperiment)
   library(ggplot2)
@@ -66,20 +66,20 @@ if (!identical(normalizePath(getwd()), notebooks_dir)) { # Set working directory
 } 
 
 cat("Working directory:", getwd(), "\n") # Tell the user where the notebook is running from.
-```
-
-```{r paths}
+#
+#
+#
 dir.create(file.path("..", "results", "preprocessing_summary"),
            recursive = TRUE, showWarnings = FALSE)
 dir.create(file.path("..", "figures", "03_preprocessing"),
            recursive = TRUE, showWarnings = FALSE)
-```
-
----
-
-## Load QC-filtered data
-
-```{r load-sce}
+#
+#
+#
+#
+#
+#
+#
 sce_path <- file.path("..", "results", "sce_qc_filtered.rds")
 if (!file.exists(sce_path)) {
   stop("Missing results/sce_qc_filtered.rds. Please render notebooks/02_quality_control.qmd first.")
@@ -87,26 +87,26 @@ if (!file.exists(sce_path)) {
 
 sce_qc <- readRDS(sce_path)
 sce_qc
-```
-
----
-
-## Select analysis assay
-
-The preferred assay order for downstream analysis is:
-
-1. `exprs` (asinh-transformed)
-2. `quant_norm` (quantile-normalised)
-3. `counts` (raw)
-
-asinh-transformed is similar to log-transformed data, but asinh is used for cytometry. This is because it handles zero and negative values gracefully, which are common in cytometry data due to background interference, while scRNA-seq data has no negative values. Log1p cannot process negative data. 
-
-Further reading on the topic can be found in the following references:
-<a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC11139855/">Direct comparison of mass cytometry and single-cell RNA sequencing of human peripheral blood mononuclear cells</a>
-
-<a href="https://doi.org/10.1038/s41592-023-01814-1"> Comparison of transformations for single-cell RNA-seq data </a>
-
-```{r assay-selection}
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
 available_assays <- assayNames(sce_qc)
 preferred_assays <- c("exprs", "quant_norm", "counts")
 analysis_assay <- preferred_assays[preferred_assays %in% available_assays][1]
@@ -117,14 +117,14 @@ if (is.na(analysis_assay)) {
 
 analysis_mat <- assay(sce_qc, analysis_assay)
 cat("Selected assay:", analysis_assay, "\n")
-```
-
----
-
-## Marker preprocessing metrics
-
-Here I set minimum percentage of cells that the marker is nonzero (1% cutoff). Then checks which markers meet this criterion and have non-zero variance, retaining only those for downstream analysis. It also makes sure the data is a valid finite number(not NA). 
-```{r marker-metrics}
+#
+#
+#
+#
+#
+#
+#
+#
 min_pct_nonzero <- 1
 n_top_variable_markers <- 30L
 
@@ -143,11 +143,11 @@ marker_metrics <- data.frame(
 n_keep <- sum(marker_metrics$keep_marker)
 cat(sprintf("Markers before preprocessing: %d\n", nrow(marker_metrics)))
 cat(sprintf("Markers retained: %d\n", n_keep))
-```
-
-```{r fig-marker-metrics}
+#
+#
+#
 #| fig-cap: "Marker variance versus prevalence (% cells with non-zero signal). Red points fail marker preprocessing."
-base_plot <- ggplot(marker_metrics,
+ggplot(marker_metrics,
        aes(x = pct_cells_nonzero, y = variance_expr, colour = keep_marker)) +
   geom_point(alpha = 0.8, size = 2) +
   scale_colour_manual(values = c("TRUE" = "steelblue", "FALSE" = "firebrick")) +
@@ -159,17 +159,16 @@ base_plot <- ggplot(marker_metrics,
     colour = "Keep marker"
   ) +
   theme_bw()
-base_plot
-
+#
+#
+#
 
 ```
-
-
----
-
-## Build preprocessed object
-
-```{r build-preprocessed-object}
+#
+#
+#
+#
+#
 keep_markers <- marker_metrics$marker_name[marker_metrics$keep_marker]
 sce_preprocessed <- sce_qc[keep_markers, ]
 
@@ -207,9 +206,9 @@ metadata(sce_preprocessed)$preprocessing <- list(
 cat(sprintf("Cells retained: %d\n", ncol(sce_preprocessed)))
 cat(sprintf("Markers retained: %d\n", nrow(sce_preprocessed)))
 cat(sprintf("Top variable markers flagged for DR: %d\n", sum(rowData(sce_preprocessed)$use_for_dr)))
-```
-
-```{r fig-top-markers}
+#
+#
+#
 #| fig-cap: "Top variable markers retained for dimensionality reduction."
 top_markers_tbl <- marker_metrics_keep |>
   dplyr::slice_head(n = top_n) |>
@@ -227,13 +226,13 @@ ggplot(top_markers_tbl, aes(x = marker_name, y = variance_expr)) +
     y = "Variance"
   ) +
   theme_bw()
-```
-
----
-
-## Save outputs
-
-```{r save-outputs}
+#
+#
+#
+#
+#
+#
+#
 params_tbl <- data.frame(
   parameter = c("analysis_assay", "min_pct_nonzero", "n_top_variable_markers",
                 "n_cells_retained", "n_markers_retained"),
@@ -256,27 +255,28 @@ write.csv(params_tbl,
 
 saveRDS(sce_preprocessed, file = file.path("..", "results", "sce_preprocessed.rds"))
 
-params_tbl 
-
 cat("Saved:\n")
 cat("  results/preprocessing_summary/marker_preprocessing_metrics.csv\n")
 cat("  results/preprocessing_summary/preprocessing_parameters.csv\n")
 cat("  results/sce_preprocessed.rds\n")
-```
-
----
-
-## Session information
-
-```{r session-info}
+#
+#
+#
+#
+#
+#
+#
 sessionInfo()
-```
-
----
-
-::: {.callout-tip}
-## Next step
-
-Proceed to dimensionality reduction and clustering notebooks using
-`results/sce_preprocessed.rds` as input.
-:::
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
