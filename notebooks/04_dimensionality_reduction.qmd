@@ -1,0 +1,389 @@
+---
+title: "Step 4 — Dimensionality Reduction"
+subtitle: "Jackson & Fischer et al. (2020) Breast Cancer | imcdatasets"
+author: "mass-cytometry-explorations"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-title: "Contents"
+    number-sections: true
+    theme: cosmo
+    code-fold: false
+    code-tools: true
+    fig-width: 9
+    fig-height: 6
+    embed-resources: true
+conda:
+  environment: mass-cytometry
+execute:
+  echo: true
+  warning: false
+  message: false
+  cache: true
+---
+
+## Overview
+
+This notebook performs **Step 4** of the replication workflow: dimensionality
+reduction on the preprocessed single-cell object for downstream clustering and
+annotation.
+
+Inputs from Step 3:
+
+- `results/sce_preprocessed.rds`
+
+Outputs from this notebook:
+
+- `results/dimensionality_reduction_summary/dimensionality_reduction_parameters.csv`
+- `results/dimensionality_reduction_summary/pca_variance_explained.csv`
+- `results/dimensionality_reduction_summary/pca_embedding.csv`
+- `results/dimensionality_reduction_summary/umap_embedding.csv` (if available)
+- `results/dimensionality_reduction_summary/tsne_embedding.csv` (if available)
+- `results/sce_dimensionality_reduced.rds`
+
+---
+
+## Setup
+
+```{r setup}
+suppressPackageStartupMessages({
+  library(SingleCellExperiment)
+  library(scater)
+  library(ggplot2)
+  library(dplyr)
+  library(patchwork)
+})
+
+if (basename(getwd()) == "notebooks") {
+  notebooks_dir <- normalizePath(getwd())
+} else if (dir.exists(file.path(getwd(), "notebooks"))) {
+  notebooks_dir <- normalizePath(file.path(getwd(), "notebooks"))
+} else {
+  stop("Run from project root or notebooks/ directory.")
+}
+
+if (!identical(normalizePath(getwd()), notebooks_dir)) {
+  setwd(notebooks_dir)
+}
+
+cat("Working directory:", getwd(), "\n")
+```
+
+```{r paths}
+dir.create(file.path("..", "results", "dimensionality_reduction_summary"),
+           recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path("..", "figures", "04_dimensionality_reduction"),
+           recursive = TRUE, showWarnings = FALSE)
+```
+
+---
+
+## Load preprocessed data
+
+```{r load-sce}
+sce_path <- file.path("..", "results", "sce_preprocessed.rds")
+if (!file.exists(sce_path)) {
+  stop("Missing results/sce_preprocessed.rds. Please render notebooks/03_preprocessing.qmd first.")
+}
+
+sce_preprocessed <- readRDS(sce_path)
+sce_preprocessed
+```
+
+---
+
+## Configure DR feature set and assay
+
+```{r dr-setup}
+dr_assay <- if ("scaled" %in% assayNames(sce_preprocessed)) {
+  "scaled"
+} else if (!is.null(metadata(sce_preprocessed)$preprocessing$analysis_assay) &&
+           metadata(sce_preprocessed)$preprocessing$analysis_assay %in% assayNames(sce_preprocessed)) {
+  metadata(sce_preprocessed)$preprocessing$analysis_assay
+} else {
+  assayNames(sce_preprocessed)[1]
+}
+
+feature_flag_present <- "use_for_dr" %in% colnames(rowData(sce_preprocessed))
+flagged_features <- if (feature_flag_present) {
+  rownames(sce_preprocessed)[as.logical(rowData(sce_preprocessed)$use_for_dr)]
+} else {
+  character(0)
+}
+
+dr_features <- if (length(flagged_features) >= 2) {
+  flagged_features
+} else {
+  rownames(sce_preprocessed)
+}
+
+n_pcs_target <- 20L
+n_umap_pcs <- 15L
+n_tsne_pcs <- 15L
+
+cat("DR assay:", dr_assay, "\n")
+cat("Number of features used for DR:", length(dr_features), "\n")
+```
+
+---
+
+## Principal component analysis (PCA)
+
+```{r run-pca}
+mat <- t(assay(sce_preprocessed, dr_assay)[dr_features, , drop = FALSE])
+max_rank <- max(2L, min(n_pcs_target, ncol(mat), nrow(mat) - 1L))
+
+pca_fit <- prcomp(mat, center = TRUE, scale. = FALSE, rank. = max_rank)
+pca_embed <- as.data.frame(pca_fit$x)
+
+if (ncol(pca_embed) < 2) {
+  stop("PCA produced fewer than 2 components; unable to proceed.")
+}
+
+reducedDim(sce_preprocessed, "PCA") <- as.matrix(pca_embed)
+
+pca_var_explained <- (pca_fit$sdev^2) / sum(pca_fit$sdev^2) * 100
+pca_var_tbl <- data.frame(
+  component = seq_along(pca_var_explained),
+  variance_explained_pct = pca_var_explained,
+  cumulative_variance_explained_pct = cumsum(pca_var_explained)
+)
+
+cat(sprintf("Computed PCA with %d components.\n", ncol(pca_embed)))
+```
+
+```{r fig-pca-variance}
+#| fig-cap: "PCA variance explained by component."
+ggplot(pca_var_tbl, aes(x = component, y = variance_explained_pct)) +
+  geom_col(fill = "steelblue", width = 0.8) +
+  geom_line(aes(y = cumulative_variance_explained_pct), colour = "firebrick", linewidth = 0.8) +
+  geom_point(aes(y = cumulative_variance_explained_pct), colour = "firebrick", size = 1.2) +
+  labs(
+    title = "PCA variance explained",
+    subtitle = "Bars: per-component variance, red line: cumulative variance",
+    x = "Principal component",
+    y = "Variance explained (%)"
+  ) +
+  theme_bw()
+```
+
+```{r fig-pca-embedding}
+#| fig-cap: "PCA embedding (PC1 vs PC2), coloured by log10 total counts."
+cell_total_counts <- if ("counts" %in% assayNames(sce_preprocessed)) {
+  colSums(assay(sce_preprocessed, "counts"), na.rm = TRUE)
+} else {
+  rowSums(mat, na.rm = TRUE)
+}
+
+pca_plot_df <- data.frame(
+  PC1 = pca_embed$PC1,
+  PC2 = pca_embed$PC2,
+  log10_total_counts = log10(cell_total_counts + 1),
+  check.names = FALSE
+)
+
+ggplot(pca_plot_df, aes(x = PC1, y = PC2, colour = log10_total_counts)) +
+  geom_point(alpha = 0.5, size = 0.7) +
+  scale_colour_viridis_c(option = "C") +
+  labs(
+    title = "PCA embedding",
+    subtitle = sprintf("Assay: %s | Features: %d", dr_assay, length(dr_features)),
+    x = "PC1",
+    y = "PC2",
+    colour = "log10(total counts + 1)"
+  ) +
+  theme_bw()
+```
+
+---
+
+## Non-linear embeddings (UMAP and t-SNE)
+
+```{r run-nonlinear}
+sce_dr <- sce_preprocessed
+
+umap_ok <- FALSE
+tsne_ok <- FALSE
+umap_error <- NA_character_
+tsne_error <- NA_character_
+
+umap_dims <- min(n_umap_pcs, ncol(reducedDim(sce_dr, "PCA")))
+tsne_dims <- min(n_tsne_pcs, ncol(reducedDim(sce_dr, "PCA")))
+
+try({
+  sce_dr <- scater::runUMAP(
+    sce_dr,
+    dimred = "PCA",
+    n_dimred = umap_dims,
+    n_neighbors = 30,
+    min_dist = 0.3,
+    name = "UMAP"
+  )
+  umap_ok <- TRUE
+}, silent = TRUE)
+
+if (!umap_ok) {
+  umap_error <- "UMAP failed (likely missing runtime dependency such as uwot)."
+}
+
+try({
+  sce_dr <- scater::runTSNE(
+    sce_dr,
+    dimred = "PCA",
+    n_dimred = tsne_dims,
+    perplexity = 30,
+    name = "TSNE"
+  )
+  tsne_ok <- TRUE
+}, silent = TRUE)
+
+if (!tsne_ok) {
+  tsne_error <- "t-SNE failed (likely missing runtime dependency such as Rtsne)."
+}
+
+if (!umap_ok) cat("UMAP status:", umap_error, "\n")
+if (!tsne_ok) cat("t-SNE status:", tsne_error, "\n")
+
+cat("UMAP computed:", umap_ok, "\n")
+cat("t-SNE computed:", tsne_ok, "\n")
+```
+
+```{r fig-nonlinear, eval=TRUE}
+#| fig-cap: "UMAP/t-SNE embeddings when available."
+plot_list <- list()
+
+if (umap_ok) {
+  umap_df <- as.data.frame(reducedDim(sce_dr, "UMAP"))
+  plot_list[["UMAP"]] <- ggplot(
+    umap_df,
+    aes(x = UMAP1, y = UMAP2, colour = log10(cell_total_counts + 1))
+  ) +
+    geom_point(alpha = 0.5, size = 0.7) +
+    scale_colour_viridis_c(option = "C") +
+    labs(
+      title = "UMAP embedding",
+      x = "UMAP1",
+      y = "UMAP2",
+      colour = "log10(total counts + 1)"
+    ) +
+    theme_bw()
+}
+
+if (tsne_ok) {
+  tsne_df <- as.data.frame(reducedDim(sce_dr, "TSNE"))
+  plot_list[["tSNE"]] <- ggplot(
+    tsne_df,
+    aes(x = TSNE1, y = TSNE2, colour = log10(cell_total_counts + 1))
+  ) +
+    geom_point(alpha = 0.5, size = 0.7) +
+    scale_colour_viridis_c(option = "C") +
+    labs(
+      title = "t-SNE embedding",
+      x = "t-SNE1",
+      y = "t-SNE2",
+      colour = "log10(total counts + 1)"
+    ) +
+    theme_bw()
+}
+
+if (length(plot_list) == 0) {
+  plot.new()
+  text(0.5, 0.5, "UMAP/t-SNE not available in current runtime.")
+} else if (length(plot_list) == 1) {
+  plot_list[[1]]
+} else {
+  plot_list[[1]] + plot_list[[2]]
+}
+```
+
+---
+
+## Save outputs
+
+```{r save-outputs}
+params_tbl <- data.frame(
+  parameter = c(
+    "dr_assay",
+    "n_cells",
+    "n_markers",
+    "n_features_used_for_dr",
+    "n_pcs_computed",
+    "umap_computed",
+    "tsne_computed",
+    "umap_pca_dims",
+    "tsne_pca_dims"
+  ),
+  value = c(
+    dr_assay,
+    as.character(ncol(sce_dr)),
+    as.character(nrow(sce_dr)),
+    as.character(length(dr_features)),
+    as.character(ncol(reducedDim(sce_dr, "PCA"))),
+    as.character(umap_ok),
+    as.character(tsne_ok),
+    as.character(umap_dims),
+    as.character(tsne_dims)
+  )
+)
+
+write.csv(params_tbl,
+          file = file.path("..", "results", "dimensionality_reduction_summary",
+                           "dimensionality_reduction_parameters.csv"),
+          row.names = FALSE)
+
+write.csv(pca_var_tbl,
+          file = file.path("..", "results", "dimensionality_reduction_summary",
+                           "pca_variance_explained.csv"),
+          row.names = FALSE)
+
+pca_out <- data.frame(cell_id = colnames(sce_dr), reducedDim(sce_dr, "PCA"), check.names = FALSE)
+write.csv(pca_out,
+          file = file.path("..", "results", "dimensionality_reduction_summary",
+                           "pca_embedding.csv"),
+          row.names = FALSE)
+
+if (umap_ok) {
+  umap_out <- data.frame(cell_id = colnames(sce_dr), reducedDim(sce_dr, "UMAP"), check.names = FALSE)
+  write.csv(umap_out,
+            file = file.path("..", "results", "dimensionality_reduction_summary",
+                             "umap_embedding.csv"),
+            row.names = FALSE)
+}
+
+if (tsne_ok) {
+  tsne_out <- data.frame(cell_id = colnames(sce_dr), reducedDim(sce_dr, "TSNE"), check.names = FALSE)
+  write.csv(tsne_out,
+            file = file.path("..", "results", "dimensionality_reduction_summary",
+                             "tsne_embedding.csv"),
+            row.names = FALSE)
+}
+
+saveRDS(sce_dr, file = file.path("..", "results", "sce_dimensionality_reduced.rds"))
+
+cat("Saved:\n")
+cat("  results/dimensionality_reduction_summary/dimensionality_reduction_parameters.csv\n")
+cat("  results/dimensionality_reduction_summary/pca_variance_explained.csv\n")
+cat("  results/dimensionality_reduction_summary/pca_embedding.csv\n")
+if (umap_ok) cat("  results/dimensionality_reduction_summary/umap_embedding.csv\n")
+if (tsne_ok) cat("  results/dimensionality_reduction_summary/tsne_embedding.csv\n")
+cat("  results/sce_dimensionality_reduced.rds\n")
+```
+
+---
+
+## Session information
+
+```{r session-info}
+sessionInfo()
+```
+
+---
+
+::: {.callout-tip}
+## Next step
+
+Proceed to clustering and cluster annotation using
+`results/sce_dimensionality_reduced.rds` as input.
+:::
