@@ -23,20 +23,29 @@ execute:
   message: false
   cache: true
 ---
+
 ## Overview
+
 This notebook performs **Step 4** of the replication workflow: dimensionality
 reduction on the preprocessed single-cell object for downstream clustering and
 annotation.
+
 Inputs from Step 3:
+
 - `results/sce_preprocessed.rds`
+
 Outputs from this notebook:
+
 - `results/dimensionality_reduction_summary/dimensionality_reduction_parameters.csv`
 - `results/dimensionality_reduction_summary/pca_variance_explained.csv`
 - `results/dimensionality_reduction_summary/pca_embedding.csv`
 - `results/dimensionality_reduction_summary/umap_embedding.csv` (if available)
 - `results/sce_dimensionality_reduced.rds`
+
 ---
+
 ## Setup
+
 ```{r setup}
 # Load the core Bioconductor container class used throughout this project.
 suppressPackageStartupMessages({
@@ -51,6 +60,7 @@ suppressPackageStartupMessages({
   # patchwork allows combining ggplot objects side by side.
   library(patchwork)
 })
+
 # Resolve the notebooks directory robustly so this notebook can be rendered
 # either from the repository root or from within notebooks/.
 if (basename(getwd()) == "notebooks") {
@@ -61,13 +71,16 @@ if (basename(getwd()) == "notebooks") {
   # Stop early with a clear error if we cannot infer the project structure.
   stop("Run from project root or notebooks/ directory.")
 }
+
 # Standardize the working directory to notebooks/ for consistent relative paths.
 if (!identical(normalizePath(getwd()), notebooks_dir)) {
   setwd(notebooks_dir)
 }
+
 # Print the final working directory for provenance/debugging in rendered output.
 cat("Working directory:", getwd(), "\n")
 ```
+
 ```{r paths}
 # Create output folder for tabular summaries generated in this step.
 dir.create(file.path("..", "results", "dimensionality_reduction_summary"),
@@ -76,8 +89,11 @@ dir.create(file.path("..", "results", "dimensionality_reduction_summary"),
 dir.create(file.path("..", "figures", "04_dimensionality_reduction"),
            recursive = TRUE, showWarnings = FALSE)
 ```
+
 ---
+
 ## Load preprocessed data
+
 ```{r load-sce}
 # Path to the preprocessed SingleCellExperiment produced in Step 3.
 sce_path <- file.path("..", "results", "sce_preprocessed.rds")
@@ -85,13 +101,17 @@ sce_path <- file.path("..", "results", "sce_preprocessed.rds")
 if (!file.exists(sce_path)) {
   stop("Missing results/sce_preprocessed.rds. Please render notebooks/03_preprocessing.qmd first.")
 }
+
 # Load the analysis-ready SCE object into memory.
 sce_preprocessed <- readRDS(sce_path)
 # Show compact object summary in the rendered report.
 sce_preprocessed
 ```
+
 ---
+
 ## Configure DR feature set and assay
+
 ```{r dr-setup}
 # Prefer the marker-wise standardized assay when available.
 dr_assay <- if ("scaled" %in% assayNames(sce_preprocessed)) {
@@ -104,6 +124,7 @@ dr_assay <- if ("scaled" %in% assayNames(sce_preprocessed)) {
   # Final fallback for robustness: use the first available assay.
   assayNames(sce_preprocessed)[1]
 }
+
 # Check whether preprocessing flagged a curated marker subset for DR.
 feature_flag_present <- "use_for_dr" %in% colnames(rowData(sce_preprocessed))
 flagged_features <- if (feature_flag_present) {
@@ -113,36 +134,46 @@ flagged_features <- if (feature_flag_present) {
   # Empty vector signals fallback to all markers below.
   character(0)
 }
+
 # Use flagged features when sufficiently sized, else all markers.
 dr_features <- if (length(flagged_features) >= 2) {
   flagged_features
 } else {
   rownames(sce_preprocessed)
 }
+
 # Target dimensions for linear and non-linear methods.
 n_pcs_target <- 20L
 n_umap_pcs <- 15L
+
 # Emit selected configuration to the report for traceability.
 cat("DR assay:", dr_assay, "\n")
 cat("Number of features used for DR:", length(dr_features), "\n")
 ```
+
 ---
+
 ## Principal component analysis (PCA)
+
 ```{r run-pca}
 # Build a cell-by-feature matrix for PCA (prcomp expects observations in rows).
 mat <- t(assay(sce_preprocessed, dr_assay)[dr_features, , drop = FALSE])
 # Clamp rank so PCA is valid for both small and large datasets.
 max_rank <- max(2L, min(n_pcs_target, ncol(mat), nrow(mat) - 1L))
+
 # Run PCA with centered features; scaling already handled by `scaled` assay.
 pca_fit <- prcomp(mat, center = TRUE, scale. = FALSE, rank. = max_rank)
 # Convert embedding to data frame for plotting/export convenience.
 pca_embed <- as.data.frame(pca_fit$x)
+
 # Ensure downstream 2D plots are possible.
 if (ncol(pca_embed) < 2) {
   stop("PCA produced fewer than 2 components; unable to proceed.")
 }
+
 # Persist PCA coordinates into the SCE reducedDims slot.
 reducedDim(sce_preprocessed, "PCA") <- as.matrix(pca_embed)
+
 # Calculate per-component and cumulative variance explained (%).
 pca_var_explained <- (pca_fit$sdev^2) / sum(pca_fit$sdev^2) * 100
 pca_var_tbl <- data.frame(
@@ -150,9 +181,11 @@ pca_var_tbl <- data.frame(
   variance_explained_pct = pca_var_explained,
   cumulative_variance_explained_pct = cumsum(pca_var_explained)
 )
+
 # Log the number of PCs available for downstream methods.
 cat(sprintf("Computed PCA with %d components.\n", ncol(pca_embed)))
 ```
+
 ```{r fig-pca-variance}
 #| fig-cap: "PCA variance explained by component."
 # Bar chart: variance explained by each PC.
@@ -169,6 +202,7 @@ ggplot(pca_var_tbl, aes(x = component, y = variance_explained_pct)) +
   ) +
   theme_bw()
 ```
+
 ```{r fig-pca-embedding}
 #| fig-cap: "PCA embedding (PC1 vs PC2), coloured by log10 total counts."
 # Prefer true total ion counts from raw counts assay when available.
@@ -178,6 +212,7 @@ cell_total_counts <- if ("counts" %in% assayNames(sce_preprocessed)) {
   # Fallback for unusual objects lacking counts assay.
   rowSums(mat, na.rm = TRUE)
 }
+
 # Build plotting table with two principal components + QC-like colour covariate.
 pca_plot_df <- data.frame(
   PC1 = pca_embed$PC1,
@@ -185,6 +220,7 @@ pca_plot_df <- data.frame(
   log10_total_counts = log10(cell_total_counts + 1),
   check.names = FALSE
 )
+
 ggplot(pca_plot_df, aes(x = PC1, y = PC2, colour = log10_total_counts)) +
   geom_point(alpha = 0.5, size = 0.7) +
   scale_colour_viridis_c(option = "C") +
@@ -197,17 +233,23 @@ ggplot(pca_plot_df, aes(x = PC1, y = PC2, colour = log10_total_counts)) +
   ) +
   theme_bw()
 ```
+
 ---
+
 ## Non-linear embedding (UMAP)
+
 ```{r run-umap}
 # Start from the object containing PCA embeddings.
 sce_dr <- sce_preprocessed
+
 # Flag records whether UMAP embedding succeeds in this environment.
 umap_ok <- FALSE
 # Error placeholder allows clear status message in output.
 umap_error <- NA_character_
+
 # Non-linear methods operate on top of PCA; cap dims by available PCs.
 umap_dims <- min(n_umap_pcs, ncol(reducedDim(sce_dr, "PCA")))
+
 # Attempt UMAP; keep notebook robust if optional dependencies are unavailable.
 try({
   sce_dr <- scater::runUMAP(
@@ -220,13 +262,16 @@ try({
   )
   umap_ok <- TRUE
 }, silent = TRUE)
+
 # Record user-facing status if UMAP was not computed.
 if (!umap_ok) {
   umap_error <- "UMAP failed (likely missing runtime dependency such as uwot)."
   cat("UMAP status:", umap_error, "\n")
 }
+
 cat("UMAP computed:", umap_ok, "\n")
 ```
+
 ```{r fig-umap, eval=TRUE}
 #| fig-cap: "UMAP embedding when available."
 # Build plot dynamically so notebook still renders if UMAP fails.
@@ -251,8 +296,11 @@ if (umap_ok) {
   text(0.5, 0.5, "UMAP not available in current runtime.")
 }
 ```
+
 ---
+
 ## Save outputs
+
 ```{r save-outputs}
 # Collect key run parameters and statuses for reproducibility.
 params_tbl <- data.frame(
@@ -275,22 +323,26 @@ params_tbl <- data.frame(
     as.character(umap_dims)
   )
 )
+
 # Save DR parameter metadata.
 write.csv(params_tbl,
           file = file.path("..", "results", "dimensionality_reduction_summary",
                            "dimensionality_reduction_parameters.csv"),
           row.names = FALSE)
+
 # Save PCA variance diagnostics.
 write.csv(pca_var_tbl,
           file = file.path("..", "results", "dimensionality_reduction_summary",
                            "pca_variance_explained.csv"),
           row.names = FALSE)
+
 # Save full PCA embedding with cell IDs as first column.
 pca_out <- data.frame(cell_id = colnames(sce_dr), reducedDim(sce_dr, "PCA"), check.names = FALSE)
 write.csv(pca_out,
           file = file.path("..", "results", "dimensionality_reduction_summary",
                            "pca_embedding.csv"),
           row.names = FALSE)
+
 # Conditionally save UMAP embedding only when successfully computed.
 if (umap_ok) {
   umap_out <- data.frame(cell_id = colnames(sce_dr), reducedDim(sce_dr, "UMAP"), check.names = FALSE)
@@ -299,8 +351,10 @@ if (umap_ok) {
                              "umap_embedding.csv"),
             row.names = FALSE)
 }
+
 # Persist SCE with all reduced dimensions for downstream clustering/annotation.
 saveRDS(sce_dr, file = file.path("..", "results", "sce_dimensionality_reduced.rds"))
+
 # Print a compact manifest of written files.
 cat("Saved:\n")
 cat("  results/dimensionality_reduction_summary/dimensionality_reduction_parameters.csv\n")
@@ -309,14 +363,20 @@ cat("  results/dimensionality_reduction_summary/pca_embedding.csv\n")
 if (umap_ok) cat("  results/dimensionality_reduction_summary/umap_embedding.csv\n")
 cat("  results/sce_dimensionality_reduced.rds\n")
 ```
+
 ---
+
 ## Session information
+
 ```{r session-info}
 sessionInfo()
 ```
+
 ---
+
 ::: {.callout-tip}
 ## Next step
+
 Proceed to clustering and cluster annotation using
 `results/sce_dimensionality_reduced.rds` as input.
 :::
