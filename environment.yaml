@@ -21,6 +21,7 @@ dependencies:
   - bioconductor-cytomapper
   - bioconductor-hdf5array
   - bioconductor-experimenthub
+  - bioconductor-scater
 
   # ── System libraries ───────────────────────────────────────────────────────
   - libjpeg-turbo          # conda-forge name (replaces bare "libjpeg")
