@@ -1,0 +1,466 @@
+---
+title: "Step 5 — Clustering and Cell Annotation"
+subtitle: "Jackson & Fischer et al. (2020) Breast Cancer | imcdatasets"
+author: "mass-cytometry-explorations"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-title: "Contents"
+    number-sections: true
+    theme: cosmo
+    code-fold: false
+    code-tools: true
+    fig-width: 9
+    fig-height: 6
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+  # The annotation table is an editable external input, so each render must reread it.
+  cache: false
+---
+
+## Overview
+
+This notebook performs **Step 5** of the analysis: it groups cells using their
+principal-component (PCA) coordinates, summarizes marker expression for each
+cluster, and adds optional manual cell-type labels. Clusters are exploratory
+groups, not automatically discovered biological cell types; inspect their
+marker profiles and validate labels against domain knowledge before interpreting
+them.
+
+Inputs from Step 4:
+
+- `results/sce_dimensionality_reduced.rds`
+
+Outputs from this notebook:
+
+- `results/clustering_summary/clustering_parameters.csv`
+- `results/clustering_summary/cluster_sizes.csv`
+- `results/clustering_summary/marker_means_by_cluster.csv`
+- `results/clustering_summary/cluster_annotation_template.csv`
+- `results/sce_clustered_annotated.rds`
+
+The annotation template is created on the first render. Review the per-cluster
+marker means, fill in the template's `annotation` column with cell-type labels,
+then render this notebook again to save those labels with the cells.
+
+---
+
+## Setup
+
+```{r setup}
+# Load the SCE accessors used to read and update the saved single-cell object.
+suppressPackageStartupMessages({
+  library(SingleCellExperiment)
+  # ggplot2 provides the cluster visualization figures below.
+  library(ggplot2)
+})
+
+# Resolve the notebooks directory so paths work from the repository root or
+# when the notebook is rendered with notebooks/ as the current directory.
+if (basename(getwd()) == "notebooks") {
+  notebooks_dir <- normalizePath(getwd())
+} else if (dir.exists(file.path(getwd(), "notebooks"))) {
+  notebooks_dir <- normalizePath(file.path(getwd(), "notebooks"))
+} else {
+  # Fail early rather than silently writing outputs to an unexpected location.
+  stop("Run from project root or notebooks/ directory.")
+}
+
+# Use one predictable base directory for all relative input and output paths.
+if (!identical(normalizePath(getwd()), notebooks_dir)) {
+  setwd(notebooks_dir)
+}
+
+# Record the working directory in the rendered report for reproducibility.
+cat("Working directory:", getwd(), "\n")
+```
+
+```{r paths}
+# Keep all machine-readable summaries for this step together.
+dir.create(file.path("..", "results", "clustering_summary"),
+           recursive = TRUE, showWarnings = FALSE)
+# Create the step-specific figure directory for future saved figures.
+dir.create(file.path("..", "figures", "05_clustering_annotation"),
+           recursive = TRUE, showWarnings = FALSE)
+```
+
+---
+
+## Load the PCA and UMAP object
+
+```{r load-sce}
+# Step 4 saves both the original cell data and reduced dimensions in this object.
+sce_path <- file.path("..", "results", "sce_dimensionality_reduced.rds")
+if (!file.exists(sce_path)) {
+  stop("Missing results/sce_dimensionality_reduced.rds. Please render notebooks/04_dimensionality_reduction.qmd first.")
+}
+
+# Loading the saved object preserves the exact cell order for clustering and
+# writing cluster labels back into colData.
+sce_clustered <- readRDS(sce_path)
+
+# Verify the expected PCA embedding exists and has at least two dimensions.
+if (!"PCA" %in% reducedDimNames(sce_clustered)) {
+  stop("The input object does not contain a PCA reduced dimension.")
+}
+pca_embedding <- reducedDim(sce_clustered, "PCA")
+if (ncol(pca_embedding) < 2L) {
+  stop("PCA must contain at least two components to cluster and visualize cells.")
+}
+
+# Show the object and its available embeddings for an initial sanity check.
+cat("Cells:", ncol(sce_clustered), "\n")
+cat("Markers:", nrow(sce_clustered), "\n")
+cat("Reduced dimensions:", paste(reducedDimNames(sce_clustered), collapse = ", "), "\n")
+```
+
+---
+
+## Configure clustering
+
+We use base R's k-means algorithm on the leading PCA coordinates. PCA provides a
+compact representation of correlated marker measurements, while avoiding the
+common mistake of treating the two-dimensional UMAP layout as a quantitative
+distance space. UMAP is used below only to visualize the resulting labels.
+
+The number of clusters and number of PCs are analysis choices, not universal
+truths. Change them below, compare alternative settings, and inspect cluster
+sizes and marker profiles. The chosen values and random seed are recorded in the
+output parameter table.
+
+```{r clustering-configuration}
+# Number of clusters to estimate; adjust after exploring cluster diagnostics.
+n_clusters <- 20L
+# Use up to the first 15 PCs, or fewer if Step 4 produced fewer components.
+n_pcs_for_clustering <- min(15L, ncol(pca_embedding))
+# Fix the seed so repeated renders with the same inputs and settings are stable.
+clustering_seed <- 2026L
+# Multiple starts reduce dependence on one random initialization.
+kmeans_nstart <- 5L
+# Limit iteration count while allowing ordinary datasets to converge.
+kmeans_iter_max <- 100L
+
+# Guard against invalid settings before starting a potentially expensive fit.
+if (nrow(pca_embedding) <= n_clusters) {
+  stop("The number of cells must be greater than n_clusters.")
+}
+if (n_clusters < 2L) {
+  stop("n_clusters must be at least 2.")
+}
+
+# Extract only the selected leading PCs to bound clustering memory and runtime.
+pca_for_clustering <- pca_embedding[, seq_len(n_pcs_for_clustering), drop = FALSE]
+if (any(!is.finite(pca_for_clustering))) {
+  stop("The selected PCA coordinates contain missing or non-finite values.")
+}
+
+cat("Clustering", nrow(pca_for_clustering), "cells using",
+    ncol(pca_for_clustering), "PCs into", n_clusters, "clusters.\n")
+```
+
+---
+
+## Cluster cells in PCA space
+
+```{r run-clustering}
+# Seed k-means to make its random starting centers reproducible.
+set.seed(clustering_seed)
+
+# Treat each row as one cell and each selected PC as a clustering feature.
+kmeans_fit <- stats::kmeans(
+  x = pca_for_clustering,
+  centers = n_clusters,
+  iter.max = kmeans_iter_max,
+  nstart = kmeans_nstart,
+  algorithm = "Lloyd"
+)
+
+# Give cluster IDs stable, readable names for tables, plots, and colData.
+cluster_levels <- sprintf("Cluster_%02d", seq_len(n_clusters))
+cluster_id <- factor(
+  cluster_levels[kmeans_fit$cluster],
+  levels = cluster_levels
+)
+
+# Store one cluster ID per cell in the SCE so downstream steps can reuse it.
+colData(sce_clustered)$cluster_id <- cluster_id
+
+# Summarize cell counts, including any empty levels for a complete cluster list.
+cluster_sizes <- as.data.frame(table(cluster_id), stringsAsFactors = FALSE)
+names(cluster_sizes) <- c("cluster_id", "n_cells")
+cluster_sizes$percent_cells <- 100 * cluster_sizes$n_cells / ncol(sce_clustered)
+cluster_sizes
+```
+
+```{r fig-cluster-sizes}
+#| fig-cap: "Number of cells assigned to each PCA-space cluster."
+# Plot cluster sizes to make highly imbalanced or unexpectedly small groups visible.
+ggplot(cluster_sizes, aes(x = cluster_id, y = n_cells)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = "Cells per cluster",
+    x = "Cluster",
+    y = "Number of cells"
+  ) +
+  theme_bw()
+```
+
+---
+
+## Visualize clusters on the embeddings
+
+```{r fig-clusters-pca}
+#| fig-cap: "PCA embedding coloured by the k-means cluster assignments."
+# Plot the first two PCA axes; this is a diagnostic view, not the full clustering space.
+pca_plot_df <- data.frame(
+  PC1 = pca_embedding[, 1],
+  PC2 = pca_embedding[, 2],
+  cluster_id = cluster_id
+)
+
+ggplot(pca_plot_df, aes(x = PC1, y = PC2, colour = cluster_id)) +
+  geom_point(alpha = 0.55, size = 0.6) +
+  labs(
+    title = "PCA embedding by cluster",
+    subtitle = sprintf("Clustering used the first %d PCs", n_pcs_for_clustering),
+    x = "PC1",
+    y = "PC2",
+    colour = "Cluster"
+  ) +
+  theme_bw()
+```
+
+```{r fig-clusters-umap}
+#| fig-cap: "UMAP embedding coloured by the PCA-space cluster assignments, when available."
+# UMAP can show neighborhood structure, but its axes and distances are not used
+# to compute the k-means clusters.
+if ("UMAP" %in% reducedDimNames(sce_clustered)) {
+  umap_embedding <- reducedDim(sce_clustered, "UMAP")
+  if (ncol(umap_embedding) >= 2L) {
+    umap_plot_df <- data.frame(
+      UMAP1 = umap_embedding[, 1],
+      UMAP2 = umap_embedding[, 2],
+      cluster_id = cluster_id
+    )
+
+    ggplot(umap_plot_df, aes(x = UMAP1, y = UMAP2, colour = cluster_id)) +
+      geom_point(alpha = 0.55, size = 0.6) +
+      labs(
+        title = "UMAP embedding by cluster",
+        x = "UMAP1",
+        y = "UMAP2",
+        colour = "Cluster"
+      ) +
+      theme_bw()
+  } else {
+    plot.new()
+    text(0.5, 0.5, "UMAP is present but has fewer than two dimensions.")
+  }
+} else {
+  # Keep the document informative when the optional UMAP calculation failed upstream.
+  plot.new()
+  text(0.5, 0.5, "UMAP was not computed in Step 4; PCA clustering is still available.")
+}
+```
+
+---
+
+## Summarize marker expression by cluster
+
+Marker expression profiles help guide biological interpretation of each cluster.
+The summary below reports mean values in the preprocessing assay (for example,
+asinh-transformed expression). It is a descriptive aid, not an automatic
+cell-type classifier; marker combinations and relevant biological context should
+be considered when assigning labels.
+
+```{r marker-profiles}
+# Reuse the assay selected in preprocessing whenever that metadata is available.
+analysis_assay <- metadata(sce_clustered)$preprocessing$analysis_assay
+if (is.null(analysis_assay) || !analysis_assay %in% assayNames(sce_clustered)) {
+  # For older or externally produced objects, use a familiar expression assay.
+  assay_candidates <- c("exprs", "quant_norm", "counts", "scaled")
+  available_candidates <- assay_candidates[assay_candidates %in% assayNames(sce_clustered)]
+  if (length(available_candidates) == 0L) {
+    stop("No supported assay is available for cluster marker summaries.")
+  }
+  analysis_assay <- available_candidates[1]
+}
+
+# Calculate each cluster's marker means separately to avoid materializing an
+# additional full cell-by-marker copy of the assay.
+cluster_marker_means <- vapply(cluster_levels, function(current_cluster) {
+  cells_in_cluster <- which(cluster_id == current_cluster)
+  rowMeans(
+    assay(sce_clustered, analysis_assay)[, cells_in_cluster, drop = FALSE],
+    na.rm = TRUE
+  )
+}, numeric(nrow(sce_clustered)))
+
+# Keep marker names explicit in the exported wide table for easy review.
+cluster_marker_means <- as.data.frame(cluster_marker_means, check.names = FALSE)
+cluster_marker_means$marker <- rownames(sce_clustered)
+cluster_marker_means <- cluster_marker_means[
+  , c("marker", cluster_levels), drop = FALSE
+]
+
+cat("Marker means use the", analysis_assay, "assay.\n")
+head(cluster_marker_means)
+```
+
+---
+
+## Review and add manual annotations
+
+The exported template keeps annotation separate from the unsupervised cluster
+IDs. Fill in the `annotation` column only after reviewing the corresponding
+marker means and plots. Leave a cell blank if the cluster is unresolved; blanks
+are stored as missing values rather than presented as confirmed cell types.
+
+```{r manual-annotations}
+# Keep the template aligned to current cluster IDs while retaining labels that
+# match clusters from an earlier render.
+annotation_path <- file.path(
+  "..", "results", "clustering_summary", "cluster_annotation_template.csv"
+)
+annotation_template <- data.frame(
+  cluster_id = cluster_levels,
+  annotation = rep("", length(cluster_levels)),
+  stringsAsFactors = FALSE
+)
+
+if (file.exists(annotation_path)) {
+  # Read the user's edited table without converting labels to factors.
+  saved_annotations <- read.csv(
+    annotation_path,
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+
+  # Validate the hand-edited file so invalid labels cannot silently misalign.
+  required_columns <- c("cluster_id", "annotation")
+  if (!all(required_columns %in% names(saved_annotations))) {
+    stop("Annotation template must contain cluster_id and annotation columns.")
+  }
+  if (anyDuplicated(saved_annotations$cluster_id)) {
+    stop("Annotation template contains duplicate cluster_id values.")
+  }
+
+  # Carry forward annotations for cluster IDs that still exist; new clusters
+  # remain blank and obsolete IDs are dropped from the refreshed template.
+  annotation_match <- match(annotation_template$cluster_id, saved_annotations$cluster_id)
+  existing_labels <- trimws(as.character(saved_annotations$annotation[annotation_match]))
+  existing_labels[is.na(existing_labels)] <- ""
+  annotation_template$annotation <- existing_labels
+}
+
+# Refresh the template after reconciling it with this run's cluster IDs. Users
+# can edit this CSV and render again to include their annotations in the SCE.
+write.csv(annotation_template, annotation_path, row.names = FALSE, na = "")
+
+# Match one reviewed label to every cell by its cluster ID.
+cell_annotations <- annotation_template$annotation[
+  match(as.character(cluster_id), annotation_template$cluster_id)
+]
+cell_annotations <- trimws(cell_annotations)
+cell_annotations[cell_annotations == ""] <- NA_character_
+colData(sce_clustered)$cluster_annotation <- cell_annotations
+
+# Show annotation coverage so blank labels are not mistaken for completed work.
+cat("Clusters with annotations:",
+    sum(nzchar(annotation_template$annotation)), "of", n_clusters, "\n")
+annotation_template
+```
+
+---
+
+## Save outputs
+
+```{r save-outputs}
+# Save run settings and fit diagnostics so the analysis can be reproduced.
+clustering_parameters <- data.frame(
+  parameter = c(
+    "method",
+    "n_cells",
+    "n_clusters",
+    "n_pcs_used",
+    "assay_for_marker_means",
+    "seed",
+    "nstart",
+    "iter_max",
+    "iterations_used",
+    "total_within_cluster_sum_of_squares"
+  ),
+  value = c(
+    "k-means on PCA coordinates",
+    as.character(ncol(sce_clustered)),
+    as.character(n_clusters),
+    as.character(n_pcs_for_clustering),
+    analysis_assay,
+    as.character(clustering_seed),
+    as.character(kmeans_nstart),
+    as.character(kmeans_iter_max),
+    as.character(kmeans_fit$iter),
+    as.character(kmeans_fit$tot.withinss)
+  ),
+  stringsAsFactors = FALSE
+)
+
+# Export tables that support independent review of the clustering and labels.
+write.csv(
+  clustering_parameters,
+  file.path("..", "results", "clustering_summary", "clustering_parameters.csv"),
+  row.names = FALSE
+)
+write.csv(
+  cluster_sizes,
+  file.path("..", "results", "clustering_summary", "cluster_sizes.csv"),
+  row.names = FALSE
+)
+write.csv(
+  cluster_marker_means,
+  file.path("..", "results", "clustering_summary", "marker_means_by_cluster.csv"),
+  row.names = FALSE
+)
+
+# Save the annotated object; blank manual labels remain NA in colData.
+saveRDS(
+  sce_clustered,
+  file = file.path("..", "results", "sce_clustered_annotated.rds")
+)
+
+# List files written so the handoff to downstream analysis is explicit.
+cat("Saved:\n")
+cat("  results/clustering_summary/clustering_parameters.csv\n")
+cat("  results/clustering_summary/cluster_sizes.csv\n")
+cat("  results/clustering_summary/marker_means_by_cluster.csv\n")
+cat("  results/clustering_summary/cluster_annotation_template.csv\n")
+cat("  results/sce_clustered_annotated.rds\n")
+```
+
+---
+
+## Session information
+
+```{r session-info}
+# Record R and package versions alongside the rendered analysis report.
+sessionInfo()
+```
+
+---
+
+::: {.callout-tip}
+## Interpretation and next step
+
+Cluster IDs represent data-driven groups, while `cluster_annotation` contains
+only labels entered in the annotation template. Revisit the chosen cluster
+number and PC count if groups are too broad, too small, or difficult to
+interpret. Downstream analyses can load `results/sce_clustered_annotated.rds`
+and use both columns in `colData`.
+:::
+---

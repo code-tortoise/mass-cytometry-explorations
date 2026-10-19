@@ -25,6 +25,8 @@ notebooks/
   01_data_acquisition.qmd   # Step 1: load data, inspect structure, validate linkage (Quarto)
   02_quality_control.qmd    # Step 2: cell/image/marker QC (Quarto)
   03_preprocessing.qmd      # Step 3: transformation, normalisation, EDA (Quarto)
+  04_dimensionality_reduction.qmd # Step 4: PCA and UMAP embeddings (Quarto)
+  05_clustering_annotation.qmd    # Step 5: cell clustering and manual annotation (Quarto)
 R/
   01_data_acquisition.R     # Step 1: plain R script equivalent
 data/
