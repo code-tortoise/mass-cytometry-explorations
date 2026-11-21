@@ -1,0 +1,431 @@
+---
+title: "Step 6 — Cluster Marker Visualization"
+subtitle: "Jackson & Fischer et al. (2020) Breast Cancer | imcdatasets"
+author: "mass-cytometry-explorations"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-title: "Contents"
+    number-sections: true
+    theme: cosmo
+    code-fold: false
+    code-tools: true
+    fig-width: 10
+    fig-height: 7
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+  cache: false
+---
+
+## Overview
+
+This notebook loads the annotated object from Step 5 and compares marker
+expression across the PCA-space clusters. Cluster-versus-rest marker scores are
+used to select candidate markers for feature plots, violin plots, dot plots,
+and heatmaps. These rankings are descriptive: they support biological review
+but do not replace validation against known marker combinations and tissue
+context.
+
+Inputs from Step 5:
+
+- `results/sce_clustered_annotated.rds`
+
+Outputs from this notebook:
+
+- `results/marker_visualization_summary/cluster_marker_scores.csv`
+- `results/marker_visualization_summary/cluster_mean_expression.csv`
+- `results/marker_visualization_summary/selected_markers.csv`
+- `figures/06_marker_visualization/`
+
+## Setup
+
+```{r setup}
+# Use the same plotting and path conventions as the earlier notebooks.
+suppressPackageStartupMessages({
+  library(SingleCellExperiment)
+  library(ggplot2)
+})
+
+if (basename(getwd()) == "notebooks") {
+  notebooks_dir <- normalizePath(getwd())
+} else if (dir.exists(file.path(getwd(), "notebooks"))) {
+  notebooks_dir <- normalizePath(file.path(getwd(), "notebooks"))
+} else {
+  stop("Run from project root or notebooks/ directory.")
+}
+
+if (!identical(normalizePath(getwd()), notebooks_dir)) {
+  setwd(notebooks_dir)
+}
+
+summary_dir <- file.path("..", "results", "marker_visualization_summary")
+figure_dir <- file.path("..", "figures", "06_marker_visualization")
+dir.create(summary_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(figure_dir, recursive = TRUE, showWarnings = FALSE)
+cat("Working directory:", getwd(), "\n")
+```
+
+## Load the Step 5 object
+
+```{r load-sce}
+sce_path <- file.path("..", "results", "sce_clustered_annotated.rds")
+if (!file.exists(sce_path)) {
+  stop("Missing results/sce_clustered_annotated.rds. Please render notebooks/05_clustering_and_annotation.qmd first.")
+}
+
+sce_markers <- readRDS(sce_path)
+if (!"cluster_id" %in% names(colData(sce_markers))) {
+  stop("The Step 5 object does not contain colData$cluster_id.")
+}
+
+cluster_id <- droplevels(factor(colData(sce_markers)$cluster_id))
+if (anyNA(cluster_id)) {
+  stop("cluster_id contains missing values.")
+}
+cluster_levels <- levels(cluster_id)
+
+if (!"UMAP" %in% reducedDimNames(sce_markers)) {
+  stop("The Step 5 object does not contain a UMAP embedding required for feature plots.")
+}
+umap_embedding <- reducedDim(sce_markers, "UMAP")
+if (ncol(umap_embedding) < 2L || any(!is.finite(umap_embedding[, 1:2]))) {
+  stop("The UMAP embedding must contain two finite dimensions.")
+}
+
+# Reuse the assay selected by preprocessing and Step 5 when possible.
+analysis_assay <- metadata(sce_markers)$preprocessing$analysis_assay
+if (is.null(analysis_assay) || length(analysis_assay) != 1L ||
+    !analysis_assay %in% assayNames(sce_markers)) {
+  assay_candidates <- c("exprs", "quant_norm", "counts", "scaled")
+  available_candidates <- assay_candidates[assay_candidates %in% assayNames(sce_markers)]
+  if (length(available_candidates) == 0L) {
+    stop("No supported expression assay is available.")
+  }
+  analysis_assay <- available_candidates[1]
+}
+
+expression_matrix <- assay(sce_markers, analysis_assay)
+if (nrow(expression_matrix) != nrow(sce_markers) ||
+    ncol(expression_matrix) != ncol(sce_markers)) {
+  stop("The selected assay does not match the dimensions of the SCE.")
+}
+if (any(!is.finite(expression_matrix))) {
+  stop("The selected assay contains non-finite values.")
+}
+
+cat("Cells:", ncol(sce_markers), "\n")
+cat("Markers:", nrow(sce_markers), "\n")
+cat("Clusters:", length(cluster_levels), "\n")
+cat("Expression assay:", analysis_assay, "\n")
+```
+
+## Configure marker selection
+
+The ranking uses the difference between the mean expression in a cluster and
+the mean expression in all other cells. Detection percentages are retained
+alongside the score so that markers expressed in only a small fraction of a
+cluster can be distinguished from broadly informative markers.
+
+```{r marker-configuration}
+top_markers_per_cluster <- 5L
+top_markers_for_dotplot <- 20L
+top_markers_for_heatmap <- 20L
+top_markers_for_violin <- 8L
+top_markers_for_feature <- 6L
+
+max_cells_per_cluster_for_cell_plots <- 500L
+if (any(c(top_markers_per_cluster, top_markers_for_dotplot,
+         top_markers_for_heatmap, top_markers_for_violin,
+         top_markers_for_feature) < 1L)) {
+  stop("All marker selection limits must be positive.")
+}
+```
+
+## Rank candidate markers by cluster
+
+```{r marker-scores}
+marker_names <- rownames(sce_markers)
+cluster_mean_matrix <- vapply(
+  cluster_levels,
+  function(current_cluster) {
+    rowMeans(expression_matrix[, cluster_id == current_cluster, drop = FALSE])
+  },
+  numeric(nrow(sce_markers))
+)
+rownames(cluster_mean_matrix) <- marker_names
+colnames(cluster_mean_matrix) <- cluster_levels
+
+cluster_marker_scores <- do.call(
+  rbind,
+  lapply(cluster_levels, function(current_cluster) {
+    in_cluster <- cluster_id == current_cluster
+    out_cluster <- !in_cluster
+    mean_in <- rowMeans(expression_matrix[, in_cluster, drop = FALSE])
+    mean_out <- rowMeans(expression_matrix[, out_cluster, drop = FALSE])
+    pct_in <- rowMeans(expression_matrix[, in_cluster, drop = FALSE] > 0) * 100
+    pct_out <- rowMeans(expression_matrix[, out_cluster, drop = FALSE] > 0) * 100
+
+    data.frame(
+      cluster_id = current_cluster,
+      marker = marker_names,
+      mean_in = as.numeric(mean_in),
+      mean_out = as.numeric(mean_out),
+      mean_difference = as.numeric(mean_in - mean_out),
+      pct_in = as.numeric(pct_in),
+      pct_out = as.numeric(pct_out),
+      detection_difference = as.numeric(pct_in - pct_out),
+      stringsAsFactors = FALSE
+    )
+  })
+)
+
+cluster_marker_scores <- cluster_marker_scores[
+  order(cluster_marker_scores$cluster_id,
+        -cluster_marker_scores$mean_difference,
+        -cluster_marker_scores$detection_difference),
+]
+
+selected_by_cluster <- do.call(
+  rbind,
+  lapply(cluster_levels, function(current_cluster) {
+    head(
+      cluster_marker_scores[
+        cluster_marker_scores$cluster_id == current_cluster,
+      ],
+      top_markers_per_cluster
+    )
+  })
+)
+selected_markers <- unique(selected_by_cluster$marker)
+
+write.csv(
+  cluster_marker_scores,
+  file.path(summary_dir, "cluster_marker_scores.csv"),
+  row.names = FALSE
+)
+write.csv(
+  data.frame(marker = rownames(cluster_mean_matrix),
+             cluster_mean_matrix,
+             check.names = FALSE),
+  file.path(summary_dir, "cluster_mean_expression.csv"),
+  row.names = FALSE
+)
+write.csv(
+  selected_by_cluster,
+  file.path(summary_dir, "selected_markers.csv"),
+  row.names = FALSE
+)
+
+head(selected_by_cluster)
+```
+
+## Feature plots
+
+Feature plots show the spatial distribution of selected markers on the UMAP
+embedding. A balanced sample of cells from each cluster keeps the rendered
+HTML responsive without changing the marker rankings.
+
+```{r feature-plot}
+set.seed(2026L)
+plot_cells <- unlist(lapply(cluster_levels, function(current_cluster) {
+  cells <- which(cluster_id == current_cluster)
+  sample(cells, min(length(cells), max_cells_per_cluster_for_cell_plots))
+}), use.names = FALSE)
+
+feature_markers <- unique(head(
+  selected_by_cluster[order(-selected_by_cluster$mean_difference), ]$marker,
+  top_markers_for_feature
+))
+feature_plot_data <- data.frame(
+  UMAP1 = umap_embedding[plot_cells, 1],
+  UMAP2 = umap_embedding[plot_cells, 2],
+  cluster_id = cluster_id[plot_cells],
+  t(expression_matrix[feature_markers, plot_cells, drop = FALSE]),
+  check.names = FALSE
+)
+
+feature_long <- do.call(
+  rbind,
+  lapply(feature_markers, function(marker) {
+    data.frame(
+      UMAP1 = feature_plot_data$UMAP1,
+      UMAP2 = feature_plot_data$UMAP2,
+      marker = marker,
+      expression = feature_plot_data[[marker]],
+      stringsAsFactors = FALSE
+    )
+  })
+)
+
+ggplot(feature_long, aes(UMAP1, UMAP2, colour = expression)) +
+  geom_point(size = 0.35, alpha = 0.7) +
+  facet_wrap(~marker, ncol = 3) +
+  scale_colour_viridis_c() +
+  labs(
+    title = "Selected marker expression on the UMAP embedding",
+    subtitle = sprintf("Up to %d cells sampled per cluster", max_cells_per_cluster_for_cell_plots),
+    colour = analysis_assay,
+    x = "UMAP1",
+    y = "UMAP2"
+  ) +
+  theme_bw()
+```
+
+## Violin plots
+
+```{r violin-plot}
+violin_markers <- unique(head(
+  selected_by_cluster[order(-selected_by_cluster$mean_difference), ]$marker,
+  top_markers_for_violin
+))
+violin_data <- data.frame(
+  cluster_id = cluster_id[plot_cells],
+  t(expression_matrix[violin_markers, plot_cells, drop = FALSE]),
+  check.names = FALSE
+)
+violin_long <- do.call(
+  rbind,
+  lapply(violin_markers, function(marker) {
+    data.frame(
+      cluster_id = violin_data$cluster_id,
+      marker = marker,
+      expression = violin_data[[marker]],
+      stringsAsFactors = FALSE
+    )
+  })
+)
+
+ggplot(violin_long, aes(cluster_id, expression, fill = cluster_id)) +
+  geom_violin(scale = "width", trim = TRUE, alpha = 0.75) +
+  facet_wrap(~marker, scales = "free_y", ncol = 2) +
+  labs(
+    title = "Marker expression distributions by cluster",
+    x = "Cluster",
+    y = analysis_assay
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+## Dot plot
+
+Dot size shows the percentage of cells with positive expression, while colour
+shows the mean expression within each cluster.
+
+```{r dot-plot}
+dot_markers <- unique(head(
+  selected_by_cluster[order(-selected_by_cluster$mean_difference), ]$marker,
+  top_markers_for_dotplot
+))
+dot_data <- do.call(
+  rbind,
+  lapply(cluster_levels, function(current_cluster) {
+    cells <- cluster_id == current_cluster
+    data.frame(
+      cluster_id = current_cluster,
+      marker = dot_markers,
+      mean_expression = rowMeans(expression_matrix[dot_markers, cells, drop = FALSE]),
+      percent_positive = rowMeans(expression_matrix[dot_markers, cells, drop = FALSE] > 0) * 100,
+      stringsAsFactors = FALSE
+    )
+  })
+)
+
+ggplot(dot_data, aes(marker, cluster_id)) +
+  geom_point(aes(size = percent_positive, colour = mean_expression)) +
+  scale_colour_viridis_c() +
+  scale_size(range = c(0.5, 6), limits = c(0, 100)) +
+  labs(
+    title = "Marker expression by cluster",
+    x = "Marker",
+    y = "Cluster",
+    colour = paste("Mean", analysis_assay),
+    size = "% positive cells"
+  ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+```
+
+## Heatmaps
+
+The first heatmap uses the top markers across clusters. Row-wise z-scores
+emphasize relative cluster specificity; the exported mean-expression table
+retains the untransformed values.
+
+```{r heatmap}
+heatmap_markers <- unique(head(
+  selected_by_cluster[order(-selected_by_cluster$mean_difference), ]$marker,
+  top_markers_for_heatmap
+))
+heatmap_matrix <- cluster_mean_matrix[heatmap_markers, , drop = FALSE]
+heatmap_z <- t(scale(t(heatmap_matrix)))
+heatmap_z[!is.finite(heatmap_z)] <- 0
+
+heatmap_data <- expand.grid(
+  marker = rownames(heatmap_z),
+  cluster_id = colnames(heatmap_z),
+  stringsAsFactors = FALSE
+)
+heatmap_data$z_score <- as.vector(heatmap_z)
+
+ggplot(heatmap_data, aes(cluster_id, marker, fill = z_score)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "#2166ac", mid = "white", high = "#b2182b") +
+  labs(
+    title = "Top cluster markers",
+    subtitle = "Row-wise z-scores of cluster mean expression",
+    x = "Cluster",
+    y = "Marker",
+    fill = "z-score"
+  ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Marker ranking per cluster
+
+```{r marker-ranking-plot}
+ranking_plot_data <- selected_by_cluster
+ranking_plot_data$marker <- factor(
+  ranking_plot_data$marker,
+  levels = rev(unique(ranking_plot_data$marker))
+)
+
+ggplot(ranking_plot_data,
+       aes(x = mean_difference, y = marker, colour = cluster_id)) +
+  geom_point(size = 2.5) +
+  facet_wrap(~cluster_id, scales = "free_y") +
+  labs(
+    title = "Candidate marker ranking by cluster",
+    x = "Mean expression difference: cluster minus rest",
+    y = "Marker",
+    colour = "Cluster"
+  ) +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+## Session information
+
+```{r session-info}
+sessionInfo()
+```
+
+::: {.callout-tip}
+## Interpretation
+
+Use the exported `cluster_marker_scores.csv` together with the feature, violin,
+dot, and heatmap views. A useful candidate marker is usually supported by a
+large cluster-versus-rest difference, high within-cluster detection, and a
+coherent combination with other markers. Treat isolated high values or
+low-frequency signals as hypotheses for review rather than confirmed cell
+types.
+:::

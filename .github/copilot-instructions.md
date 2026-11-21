@@ -14,6 +14,7 @@
   quarto render notebooks/03_preprocessing.qmd
   quarto render notebooks/04_dimensionality_reduction.qmd
   quarto render notebooks/05_clustering_and_annotation.qmd
+  quarto render notebooks/06_marker_visualization.qmd
   ```
 - There is no configured automated test suite, linter, formatter, or project-wide build command. Validate notebook changes by rendering the changed stage and any downstream stage whose input/output contract changed.
 
@@ -26,6 +27,7 @@ The repository is a sequential R/Quarto replication analysis of the `JacksonFisc
 3. `03_preprocessing.qmd` selects an analysis assay, filters markers, adds a marker-wise `scaled` assay, flags variable markers in `rowData(...$use_for_dr)`, and writes `results/sce_preprocessed.rds`.
 4. `04_dimensionality_reduction.qmd` uses those features to calculate PCA plus optional UMAP/t-SNE, stores embeddings in `reducedDims`, and writes `results/sce_dimensionality_reduced.rds`.
 5. `05_clustering_and_annotation.qmd` runs seeded k-means on leading PCA coordinates, writes `colData(...$cluster_id)`, and saves `results/sce_clustered_annotated.rds`.
+6. `06_marker_visualization.qmd` ranks cluster-versus-rest marker expression and renders feature, violin, dot, and heatmap views from the Step 5 object.
 
 Each stage also writes CSV summaries under its own `results/*_summary/` directory. Treat the saved `.rds` object, its assay names, `rowData`, `colData`, metadata, and reduced-dimension names as the interface between stages; update downstream notebooks when changing any of them.
 
